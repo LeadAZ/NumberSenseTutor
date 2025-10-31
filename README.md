@@ -4,7 +4,7 @@ NumberSense Tutor is an interactive web app that helps students strengthen their
 It was designed for learners who need extra practice visualizing quantities, building mental math strategies, and developing confidence with basic arithmetic.
 
 Live App:  
-https://edgarhd1.github.io/NumberSenseTutor/
+https://leadaz.github.io/NumberSenseTutor/
 
 ## Purpose
 

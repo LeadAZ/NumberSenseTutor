@@ -3,6 +3,7 @@
 // - modeSelect, opSelect, maxNumber now update state and generate correct problems
 // - newProblem() now reflects visual / word / decompose properly
 // - UI wiring for buttons and keyboard is set up after session start
+// - downloadSessionCSV() is top-level and uses per-attempt timestamps
 
 const SESSIONS_KEY = 'ns_sessions_v1';
 
@@ -142,7 +143,15 @@ function startApp(){
   renderStats();
   renderHistoryTable();
 
-  // Turn currentSession.history into a CSV string and trigger a download
+  // get first problem
+  newProblem();
+}
+
+/* -------------------------
+   CSV EXPORT
+------------------------- */
+
+// Turn currentSession.history into a CSV string and trigger a download
 function downloadSessionCSV() {
   if (!currentSession) {
     alert('No session loaded.');
@@ -165,14 +174,11 @@ function downloadSessionCSV() {
     'Timestamp'
   ];
 
-  // Map each attempt into a CSV-safe row
-  // We'll include a timestamp per row using Date(...) for teacher reference
   const dataRows = rows.map(item => {
-    // Clean commas/quotes for CSV safety
     const clean = (val) => {
       if (val === null || val === undefined) return '';
       const str = String(val);
-      // wrap in quotes if it contains comma or quote
+      // wrap in quotes if it contains comma, quote, or newline
       if (str.includes(',') || str.includes('"') || str.includes('\n')) {
         return `"${str.replace(/"/g, '""')}"`;
       }
@@ -185,20 +191,21 @@ function downloadSessionCSV() {
       clean(item.correct ? 'Yes' : 'No'),
       clean(item.timeTaken),
       clean(item.hintUsed ? 'Yes' : 'No'),
-      clean(new Date().toISOString()) // you could store per-attempt timestamp later if you want
+      clean(item.timestamp || '')   // per-attempt timestamp
     ].join(',');
   });
 
   const csvString = [header.join(','), ...dataRows].join('\n');
 
-  // Create a blob and a temporary download link
   const blob = new Blob([csvString], { type: 'text/csv' });
 
-  // Generate a filename with a date stamp so you can keep copies over time
-  const now = new Date();
-  const yyyy = now.getFullYear();
-  const mm = String(now.getMonth()+1).padStart(2,'0');
-  const dd = String(now.getDate()).padStart(2,'0');
+  // Name file with session start date (createdAt) if available
+  const sessionDate = currentSession.createdAt
+    ? new Date(currentSession.createdAt)
+    : new Date();
+  const yyyy = sessionDate.getFullYear();
+  const mm = String(sessionDate.getMonth()+1).padStart(2,'0');
+  const dd = String(sessionDate.getDate()).padStart(2,'0');
   const fileName = `numbersense_session_${yyyy}-${mm}-${dd}.csv`;
 
   const url = URL.createObjectURL(blob);
@@ -209,10 +216,6 @@ function downloadSessionCSV() {
   a.click();
   a.remove();
   URL.revokeObjectURL(url);
-}
-
-  // get first problem
-  newProblem();
 }
 
 /* -------------------------
@@ -274,96 +277,65 @@ function getHint({ a, b, op }) {
   if (op === '-') {
 
     // CASE A: both numbers under or equal to 10 and b < a
-    // Student is likely still in "counting back" territory
-    // Example: 9 - 4
     if (a <= 10 && b < a) {
-      // We teach counting down, not formal regroup
       return `Start at ${a}. Count back ${b} steps. Where do you land?`;
     }
 
     // CASE B: subtracting a big chunk (like 17 - 12)
-    // Strategy: take away 10 first, then take away the rest
-    // We'll call "the rest" (b - 10) if b is 10 or more
     if (b >= 10 && b < a) {
       const extra = b - 10;
       if (extra > 0) {
         return `Take away 10 first. Then take away ${extra} more. How many are left after both steps?`;
       } else {
-        // b is exactly 10
         return `Take away 10. How many are left?`;
       }
     }
 
     // CASE C: a > 10 and b < a
-    // We want to use the “break apart to get to a friendly 10” idea.
-    // Example: 14 - 6.
-    // We think: go from 14 down to 10 (that used 4), then take away the rest (2).
     if (a > 10 && b < a) {
-      const tens = Math.floor(a / 10) * 10; // e.g. 14 -> 10
-      const distanceToTen = a - tens;      // how far from a down to that friendly 10
-      const stillNeed = b - distanceToTen; // how much more to remove after hitting 10
+      const tens = Math.floor(a / 10) * 10;
+      const distanceToTen = a - tens;
+      const stillNeed = b - distanceToTen;
 
-      // If we can subtract just from the "ones" part without going past 0:
-      // Example: 14 - 3. Ones is 4, and 4 >= 3.
       if (distanceToTen >= b) {
-        // This reads: "14 is 10 and 4. Take 3 from the 4. Then put 10 with what's left."
         return `${a} is ${tens} and ${distanceToTen}. Take away ${b} from the ${distanceToTen}. Then put the ${tens} with what is left.`;
       }
 
-      // Otherwise we need a two-step subtraction using 10 as an in-between.
-      // Example: 14 - 6:
-      //   "Go from 14 down to 10. That used 4. You still need to take away 2 more from 10."
       if (stillNeed > 0 && tens - stillNeed >= 0) {
         return `Think of ${a} as ${tens} and ${distanceToTen}. First go down from ${a} to ${tens} (that used ${distanceToTen}). You still need to take away ${stillNeed} more from ${tens}.`;
       }
     }
 
-    // CASE D: generic fallback for subtraction
-    // For anything like 25 - 7, 30 - 18, etc. that doesn't hit a special case above
+    // CASE D: generic fallback
     return `You have ${a}. You give away ${b}. Picture taking ${b} away. How many are left?`;
   }
 
   // ADDITION HINTS
-  // (op === '+')
 
-  // CASE 1: doubles (like 6 + 6)
-  // We teach "double" as a known fact pattern, but we won't say the answer.
+  // doubles
   if (a === b) {
     return `Double ${a}. That means counting ${a} two times.`;
   }
 
-  // We'll define some helpers for clarity
   const bigger = Math.max(a, b);
   const smaller = Math.min(a, b);
 
-  // CASE 2: both parts are 10 or less
-  // This is usually where the student is either counting all or counting on.
-  // We encourage "start at the bigger number and count up the smaller".
+  // both small
   if (a <= 10 && b <= 10) {
-    // If the sum crosses 10 (like 8 + 5), we want to introduce "make 10".
     if (a + b > 10) {
-      // classic make-10 language
       return `Make 10 first. Take what you need to get to 10, then add the rest.`;
     }
-
-    // Otherwise, standard "count up" language
     return `Start at ${bigger}. Count up ${smaller} more. What number do you get?`;
   }
 
-  // CASE 3: make a friendly 10 for larger numbers that are close to a 10 boundary
-  // e.g. 14 + 6 -> think "14 + 6 is like 14 + 6 = 20; you can see 14 needs 6 to reach 20"
-  // For a student with weak number sense, we don't want full place value terms,
-  // but we DO want them thinking in chunks of 10 or 20.
-  // We'll just say "push it to the next friendly number".
-  const nextFriendly10 = Math.ceil(bigger / 10) * 10; // next 10 up from bigger
+  // build a friendly 10/20
+  const nextFriendly10 = Math.ceil(bigger / 10) * 10;
   const needToFriendly = nextFriendly10 - bigger;
-  // Only use this hint if it's reasonable (needToFriendly is positive and less than smaller,
-  // which means we can "use part of the smaller number" to get to that multiple of 10).
   if (needToFriendly > 0 && needToFriendly < smaller) {
     return `Build a friendly number. Use part of the smaller number to get from ${bigger} up to ${nextFriendly10}. Then add what is left.`;
   }
 
-  // CASE 4: generic addition fallback
+  // fallback
   return `Put ${a} and ${b} together. Think about adding the smaller number onto the bigger number.`;
 }
 
@@ -389,39 +361,30 @@ function makeStory(cur){
 ------------------------- */
 
 function newProblem(){
-  // build & store new problem
   const cur = generateProblem(state.mode, state.op, state.max);
   state.current = cur;
   state.startTime = Date.now();
   state.hintUsed = false;
 
-  // clear feedback and visuals
   feedback.textContent = '';
   hintText.textContent = '';
   visualArea.innerHTML = '';
 
-  // problem text depends on mode:
-  // - word mode -> story
-  // - other modes -> cur.text
   if (state.mode === 'word' && cur.type === 'arith') {
     problemArea.textContent = makeStory(cur);
   } else {
     problemArea.textContent = cur.text;
   }
 
-  // visual mode draws ten-frames (arith or decompose)
   if (state.mode === 'visual' && (cur.type === 'arith' || cur.type === 'decompose')) {
     renderVisual(cur);
   }
 
-  // adjust input field type/placeholder for mode
   configureAnswerFieldForMode();
 
-  // reset input
   answerInput.value = '';
   answerInput.focus();
 
-  // restart timer
   startTimer();
 }
 
@@ -453,7 +416,6 @@ function renderVisual(cur){
     container.appendChild(frame);
   }
 
-  // If subtraction, cross out b from the filled dots
   if (cur.type === 'arith' && cur.op === '-') {
     const totalCells = container.querySelectorAll('.cell.filled');
     for (let i=totalCells.length-1, rem=cur.b; rem>0 && i>=0; i--, rem--){
@@ -496,7 +458,7 @@ function checkAnswerAndAdvance(){
   const raw = answerInput.value.trim();
   if (!raw){
     feedback.textContent = 'Please type an answer first.';
-    startTimer(); // resume timer if they didn't actually answer
+    startTimer();
     return;
   }
 
@@ -526,7 +488,6 @@ function checkAnswerAndAdvance(){
     }
   }
 
-  // student-facing feedback
   if (correct){
     if (cur.type === 'decompose'){
       const pairs = allDecomposePairs(cur.n).join(' • ');
@@ -547,7 +508,6 @@ function checkAnswerAndAdvance(){
     }
   }
 
-  // update session stats
   currentSession.stats.attempted++;
   currentSession.stats.times.push(timeTaken);
   if (correct){
@@ -557,25 +517,24 @@ function checkAnswerAndAdvance(){
     currentSession.stats.streak = 0;
   }
 
-  // log the attempt for history table
+  // log the attempt with per-attempt timestamp
   currentSession.history.push({
     problemText: displayTextForHistory(cur),
     studentAnswer: raw,
     correct,
     timeTaken,
-    hintUsed: state.hintUsed
+    hintUsed: state.hintUsed,
+    timestamp: new Date().toISOString()
   });
 
   persistSession();
   renderStats();
   renderHistoryTable();
 
-  // immediately create next problem so Enter can't double count
   newProblem();
 }
 
 function displayTextForHistory(cur){
-  // what we show in the history column "Problem"
   if (state.mode === 'word' && cur.type === 'arith') {
     return makeStory(cur);
   }
@@ -745,32 +704,26 @@ function stopTimer(){
 ------------------------- */
 
 function wireUI(){
-  // Only wire once. If wireUI somehow runs twice, ignore duplicates.
   if (wireUI._wired) return;
   wireUI._wired = true;
 
-  // answer form submit (Enter / Check)
   answerForm.addEventListener('submit',(e)=>{
     e.preventDefault();
     checkAnswerAndAdvance();
   });
 
-  // new problem button
   nextBtn.addEventListener('click',()=>{
     newProblem();
   });
 
-  // hint button
   hintBtn.addEventListener('click',()=>{
     showHint();
   });
 
-  // download session data as CSV
   downloadSessionBtn.addEventListener('click', () => {
     downloadSessionCSV();
   });
 
-  // reset all data (wipe local sessions)
   resetStatsBtn.addEventListener('click',()=>{
     if (confirm('This will erase all saved sessions and progress. Are you sure?')){
       localStorage.removeItem(SESSIONS_KEY);
@@ -782,22 +735,18 @@ function wireUI(){
     }
   });
 
-  // global keyboard shortcuts
   document.addEventListener('keydown', globalKeydown);
 
-  // modeSelect change -> update state.mode, regenerate new problem
   modeSelect.addEventListener('change', (e)=>{
-    state.mode = e.target.value;   // 'flash','visual','word','decompose'
+    state.mode = e.target.value;
     newProblem();
   });
 
-  // opSelect change -> update state.op, regenerate
   opSelect.addEventListener('change', (e)=>{
-    state.op = e.target.value;     // 'mix','add','sub'
+    state.op = e.target.value;
     newProblem();
   });
 
-  // maxNumber change -> clamp and regenerate
   maxNumber.addEventListener('change', (e)=>{
     let v = parseInt(e.target.value,10);
     if (!Number.isFinite(v)) v = 20;

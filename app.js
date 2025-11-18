@@ -10,6 +10,17 @@ const SESSIONS_KEY = 'ns_sessions_v1';
 // DOM helpers
 const $ = (id)=>document.getElementById(id);
 
+// Format time in seconds as mm:ss.ss (minutes:seconds with hundredths)
+function formatTime(totalSeconds) {
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds - minutes * 60;
+
+  const mm = String(minutes).padStart(2, '0');
+  const ss = seconds.toFixed(2).padStart(5, '0'); // e.g. "00:05.23"
+
+  return `${mm}:${ss}`;
+}
+
 // Elements
 const sessionOverlay   = $('sessionOverlay');
 const continueBtn      = $('continueSessionBtn');
@@ -452,7 +463,9 @@ function checkAnswerAndAdvance(){
   if (!state.current) return;
 
   stopTimer();
-  const timeTaken = Math.round((Date.now()-state.startTime)/1000);
+  const elapsedMs    = Date.now() - state.startTime;
+  const totalSeconds = elapsedMs / 1000;
+  const timeDisplay  = formatTime(totalSeconds);  // "mm:ss.ss"
 
   const cur = state.current;
   const raw = answerInput.value.trim();
@@ -493,23 +506,23 @@ function checkAnswerAndAdvance(){
       const pairs = allDecomposePairs(cur.n).join(' • ');
       feedback.innerHTML =
         `Correct — all ways to make ${cur.n}: ` +
-        `<span style="font-weight:600">${pairs}</span> (took ${timeTaken}s)`;
+        `<span style="font-weight:600">${pairs}</span> (took ${timeDisplay})`;
     } else {
       feedback.textContent =
-        `Correct — ${problemTextForHistory(cur)} = ${correctAnswer} (took ${timeTaken}s)`;
+        `Correct — ${problemTextForHistory(cur)} = ${correctAnswer} (took ${timeDisplay})`;
     }
   } else {
     if (cur.type === 'decompose'){
       feedback.textContent =
-        `Not quite. Try another way to split ${cur.n}. (took ${timeTaken}s)`;
+        `Not quite. Try another way to split ${cur.n}. (took ${timeDisplay})`;
     } else {
       feedback.textContent =
-        `Not quite. The answer is ${correctAnswer}. (took ${timeTaken}s)`;
+        `Not quite. The answer is ${correctAnswer}. (took ${timeDisplay})`;
     }
   }
 
   currentSession.stats.attempted++;
-  currentSession.stats.times.push(timeTaken);
+  currentSession.stats.times.push(totalSeconds);
   if (correct){
     currentSession.stats.correct++;
     currentSession.stats.streak = (currentSession.stats.streak || 0) + 1;
@@ -522,7 +535,7 @@ function checkAnswerAndAdvance(){
     problemText: displayTextForHistory(cur),
     studentAnswer: raw,
     correct,
-    timeTaken,
+    timeTaken: timeDisplay,     // "mm:ss.ss"
     hintUsed: state.hintUsed,
     timestamp: new Date().toISOString()
   });

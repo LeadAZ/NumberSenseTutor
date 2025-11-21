@@ -239,20 +239,73 @@ function randInt(min,max){
 
 // Builds one new math/decompose problem object
 function generateProblem(mode, op, max){
-  // Decompose mode: split N into parts
-  if (mode === 'decompose'){
-    const n = randInt(5, Math.max(6, max));
-    const a = randInt(1, n-1);
-    const b = n - a;
+  // Math Shortcut: Make 10 (addition only)
+  if (mode === 'shortcut_make10') {
+    // Build a list of (a,b) pairs that:
+    // - have a between 6 and 9 (so Make-10 strategy is meaningful)
+    // - sum to > 10 (we cross 10)
+    // - each addend between 1 and 9
+    // - total sum <= max (respect Max Number setting)
+    const candidates = [];
+    for (let a = 6; a <= 9; a++) {
+      for (let b = 1; b <= 9; b++) {
+        const sum = a + b;
+        if (sum > 10 && sum <= max) {
+          candidates.push({ a, b });
+        }
+      }
+    }
+
+    // If max is too small to support Make-10 style problems (e.g., max < 11),
+    // fall back to normal flash-card style arithmetic.
+    if (!candidates.length) {
+      // fall back to standard arithmetic generation
+      return generateProblem('flash', op, max);
+    }
+
+    const pair = candidates[randInt(0, candidates.length - 1)];
+    const a = pair.a;
+    const b = pair.b;
+    const answer = a + b;
+
     return {
-      type:'decompose',
-      n,
-      text: `Split ${n} into two whole-number parts.`,
-      hint:`Find two whole numbers that add to ${n}. Start small and build up.`
+      type: 'arith',
+      a,
+      b,
+      op: '+',
+      answer,
+      shortcut: 'make10',
+      text: `${a} + ${b} = ?`,
+      hint: make10Hint(a, b)
     };
   }
 
-  // Decide + or - for arithmetic modes
+  // Decompose mode: split N into parts
+if (mode === 'decompose'){
+  const n = randInt(5, Math.max(6, max));
+  const a = randInt(1, n-1);
+  const b = n - a;
+  return {
+    type:'decompose',
+    n,
+    text: `Split ${n} into two whole-number parts.`,
+    hint:`Find two whole numbers that add to ${n}. Start small and build up.`
+  };
+}
+
+function make10Hint(a, b) {
+  const need = 10 - a;
+  const leftover = b - need;
+
+  if (need > 0 && leftover >= 0) {
+    return `${a} needs ${need} to make 10. Take ${need} from ${b}, which leaves ${leftover}. Now think 10 + ${leftover}.`;
+  }
+
+  // Fallback text (should rarely be needed given how we generate problems)
+  return 'Use the make-10 shortcut: move enough from the second number to the first to build 10, then add what is left.';
+}
+
+// Decide + or - for arithmetic modes
   const fullop = (op === 'mix')
     ? (Math.random() < 0.5 ? 'add' : 'sub')
     : op;
@@ -389,6 +442,8 @@ function newProblem(){
 
   if (state.mode === 'visual' && (cur.type === 'arith' || cur.type === 'decompose')) {
     renderVisual(cur);
+  } else if (state.mode === 'shortcut_make10' && cur.type === 'arith') {
+  renderMake10Visual(cur);
   }
 
   configureAnswerFieldForMode();
@@ -434,6 +489,63 @@ function renderVisual(cur){
       totalCells[i].classList.remove('filled');
     }
   }
+
+  visualArea.appendChild(container);
+}
+
+function renderMake10Visual(cur){
+  const { a, b } = cur;
+
+  const container = document.createElement('div');
+  container.className = 'card';
+  container.setAttribute('aria-label','make-10 visual');
+
+  const title = document.createElement('div');
+  title.textContent = 'Make 10 by moving dots:';
+  title.style.fontSize = '14px';
+  title.style.marginBottom = '4px';
+  container.appendChild(title);
+
+  const row = document.createElement('div');
+  row.style.display = 'flex';
+  row.style.gap = '16px';
+  row.style.flexWrap = 'wrap';
+
+  // First frame: starting with "a"
+  const frameA = document.createElement('div');
+  frameA.className = 'tenframe';
+  for (let i = 1; i <= 10; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    if (i <= a) cell.classList.add('filled');
+    frameA.appendChild(cell);
+  }
+
+  // Second frame: starting with "b"
+  const frameB = document.createElement('div');
+  frameB.className = 'tenframe';
+  for (let i = 1; i <= 10; i++) {
+    const cell = document.createElement('div');
+    cell.className = 'cell';
+    if (i <= b) cell.classList.add('filled');
+    frameB.appendChild(cell);
+  }
+
+  row.appendChild(frameA);
+  row.appendChild(frameB);
+  container.appendChild(row);
+
+  const need = 10 - a;
+  const leftover = b - need;
+
+  const expl = document.createElement('div');
+  expl.className = 'hint';
+  if (need > 0 && leftover >= 0) {
+    expl.textContent = `${a} needs ${need} to make 10. Imagine sliding ${need} dots from the second frame to the first. Then you have 10 and ${leftover}.`;
+  } else {
+    expl.textContent = 'Use the first frame to build 10, then see what is left in the second.';
+  }
+  container.appendChild(expl);
 
   visualArea.appendChild(container);
 }

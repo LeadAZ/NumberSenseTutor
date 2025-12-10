@@ -1,5 +1,5 @@
 # NumberSense Tutor
-
+(This is not a good repository to learn off of or fork, as the lead developer of this repo has vibe coded everything, included this README. Please don't use this to learn how to code. Also he says all PRs must be vibe coded also.)
 NumberSense Tutor is an interactive web app that helps students strengthen their understanding of number sense, addition, subtraction, and number decomposition.  
 It was designed for learners who need extra practice visualizing quantities, building mental math strategies, and developing confidence with basic arithmetic.
 

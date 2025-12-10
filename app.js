@@ -1,9 +1,8 @@
-// NumberSense Tutor v3.1
+// NumberSense Tutor v3.2
 // Fixes:
-// - modeSelect, opSelect, maxNumber now update state and generate correct problems
-// - newProblem() now reflects visual / word / decompose properly
+// - Added Division support to generateProblem, getHint, makeStory, and problemTextForHistory
+// - Division ensures dividends do not exceed Max Number
 // - UI wiring for buttons and keyboard is set up after session start
-// - downloadSessionCSV() is top-level and uses per-attempt timestamps
 
 const SESSIONS_KEY = 'ns_sessions_v1';
 
@@ -58,7 +57,7 @@ const historyBody      = $('historyBody');
 // runtime state
 const state = {
   mode:       'flash',        // 'flash' | 'visual' | 'word' | 'decompose'
-  op:         'mix',          // 'add' | 'sub' | 'mix'
+  op:         'mix',          // 'add' | 'sub' | 'mix' | 'div'
   max:        20,
   current:    null,           // current problem object
   startTime:  null,
@@ -241,11 +240,6 @@ function randInt(min,max){
 function generateProblem(mode, op, max){
   // Math Shortcut: Make 10 (addition only)
   if (mode === 'shortcut_make10') {
-    // Build a list of (a,b) pairs that:
-    // - have a between 6 and 9 (so Make-10 strategy is meaningful)
-    // - sum to > 10 (we cross 10)
-    // - each addend between 1 and 9
-    // - total sum <= max (respect Max Number setting)
     const candidates = [];
     for (let a = 6; a <= 9; a++) {
       for (let b = 1; b <= 9; b++) {
@@ -256,10 +250,7 @@ function generateProblem(mode, op, max){
       }
     }
 
-    // If max is too small to support Make-10 style problems (e.g., max < 11),
-    // fall back to normal flash-card style arithmetic.
     if (!candidates.length) {
-      // fall back to standard arithmetic generation
       return generateProblem('flash', op, max);
     }
 
@@ -281,34 +272,53 @@ function generateProblem(mode, op, max){
   }
 
   // Decompose mode: split N into parts
-if (mode === 'decompose'){
-  const n = randInt(5, Math.max(6, max));
-  const a = randInt(1, n-1);
-  const b = n - a;
-  return {
-    type:'decompose',
-    n,
-    text: `Split ${n} into two whole-number parts.`,
-    hint:`Find two whole numbers that add to ${n}. Start small and build up.`
-  };
-}
-
-function make10Hint(a, b) {
-  const need = 10 - a;
-  const leftover = b - need;
-
-  if (need > 0 && leftover >= 0) {
-    return `${a} needs ${need} to make 10. Take ${need} from ${b}, which leaves ${leftover}. Now think 10 + ${leftover}.`;
+  if (mode === 'decompose'){
+    const n = randInt(5, Math.max(6, max));
+    const a = randInt(1, n-1);
+    const b = n - a;
+    return {
+      type:'decompose',
+      n,
+      text: `Split ${n} into two whole-number parts.`,
+      hint:`Find two whole numbers that add to ${n}. Start small and build up.`
+    };
   }
 
-  // Fallback text (should rarely be needed given how we generate problems)
-  return 'Use the make-10 shortcut: move enough from the second number to the first to build 10, then add what is left.';
-}
+  // Determine actual operation for this problem
+  let fullop = op;
+  if (op === 'mix') {
+    fullop = (Math.random() < 0.5 ? 'add' : 'sub');
+  }
 
-// Decide + or - for arithmetic modes
-  const fullop = (op === 'mix')
-    ? (Math.random() < 0.5 ? 'add' : 'sub')
-    : op;
+  if (fullop === 'div') {
+    // DIVISION GENERATION
+    // Logic: Answer (quotient) * Divisor = Dividend (a)
+    // We want 'a' <= max.
+    // Divisor 'b' should be at least 2.
+    
+    // Pick divisor 'b' first.
+    // To ensure meaningful problems, limit divisor to typical table range (2-12) 
+    // or smaller if 'max' is small.
+    const maxDivisor = Math.min(12, Math.floor(max / 2));
+    const b = randInt(2, Math.max(2, maxDivisor));
+    
+    // Pick quotient 'q' such that q * b <= max.
+    const maxQ = Math.floor(max / b);
+    // If maxQ < 1, we can't make a problem (shouldn't happen if max >= 5)
+    const quotient = randInt(1, Math.max(1, maxQ));
+    
+    const dividend = b * quotient; // This is 'a'
+
+    return {
+      type: 'arith',
+      a: dividend,
+      b: b,
+      op: '/',
+      answer: quotient,
+      text: `${dividend} ÷ ${b} = ?`,
+      hint: getHint({ a: dividend, b: b, op: '/' })
+    };
+  }
 
   if (fullop === 'add'){
     const a = randInt(1, max-1);
@@ -322,6 +332,7 @@ function make10Hint(a, b) {
       hint:getHint({a,b,op:'+'})
     };
   } else {
+    // SUBTRACTION
     const a = randInt(2, max);
     const b = randInt(1, a-1);
     return {
@@ -335,17 +346,28 @@ function make10Hint(a, b) {
   }
 }
 
+function make10Hint(a, b) {
+  const need = 10 - a;
+  const leftover = b - need;
+
+  if (need > 0 && leftover >= 0) {
+    return `${a} needs ${need} to make 10. Take ${need} from ${b}, which leaves ${leftover}. Now think 10 + ${leftover}.`;
+  }
+  return 'Use the make-10 shortcut: move enough from the second number to the first to build 10, then add what is left.';
+}
+
 // Strategy hint text
 function getHint({ a, b, op }) {
+  // DIVISION HINTS
+  if (op === '/') {
+    return `Think multiplication: what number times ${b} equals ${a}? ( ? × ${b} = ${a} )`;
+  }
+
   // SUBTRACTION HINTS
   if (op === '-') {
-
-    // CASE A: both numbers under or equal to 10 and b < a
     if (a <= 10 && b < a) {
       return `Start at ${a}. Count back ${b} steps. Where do you land?`;
     }
-
-    // CASE B: subtracting a big chunk (like 17 - 12)
     if (b >= 10 && b < a) {
       const extra = b - 10;
       if (extra > 0) {
@@ -354,37 +376,27 @@ function getHint({ a, b, op }) {
         return `Take away 10. How many are left?`;
       }
     }
-
-    // CASE C: a > 10 and b < a
     if (a > 10 && b < a) {
       const tens = Math.floor(a / 10) * 10;
       const distanceToTen = a - tens;
       const stillNeed = b - distanceToTen;
-
       if (distanceToTen >= b) {
         return `${a} is ${tens} and ${distanceToTen}. Take away ${b} from the ${distanceToTen}. Then put the ${tens} with what is left.`;
       }
-
       if (stillNeed > 0 && tens - stillNeed >= 0) {
         return `Think of ${a} as ${tens} and ${distanceToTen}. First go down from ${a} to ${tens} (that used ${distanceToTen}). You still need to take away ${stillNeed} more from ${tens}.`;
       }
     }
-
-    // CASE D: generic fallback
     return `You have ${a}. You give away ${b}. Picture taking ${b} away. How many are left?`;
   }
 
   // ADDITION HINTS
-
-  // doubles
   if (a === b) {
     return `Double ${a}. That means counting ${a} two times.`;
   }
-
   const bigger = Math.max(a, b);
   const smaller = Math.min(a, b);
 
-  // both small
   if (a <= 10 && b <= 10) {
     if (a + b > 10) {
       return `Make 10 first. Take what you need to get to 10, then add the rest.`;
@@ -392,14 +404,11 @@ function getHint({ a, b, op }) {
     return `Start at ${bigger}. Count up ${smaller} more. What number do you get?`;
   }
 
-  // build a friendly 10/20
   const nextFriendly10 = Math.ceil(bigger / 10) * 10;
   const needToFriendly = nextFriendly10 - bigger;
   if (needToFriendly > 0 && needToFriendly < smaller) {
     return `Build a friendly number. Use part of the smaller number to get from ${bigger} up to ${nextFriendly10}. Then add what is left.`;
   }
-
-  // fallback
   return `Put ${a} and ${b} together. Think about adding the smaller number onto the bigger number.`;
 }
 
@@ -408,13 +417,18 @@ function makeStory(cur){
   const patterns = [
     ({a,b,op}) => op==='+' ?
       `You have ${a} toy cars and your friend gives you ${b} more. How many now?` :
-      `You had ${a} stickers and gave away ${b}. How many left?`,
+      (op==='/' ? `You have ${a} toy cars and want to share them equally among ${b} friends. How many does each friend get?` :
+      `You had ${a} stickers and gave away ${b}. How many left?`),
+    
     ({a,b,op}) => op==='+' ?
       `There are ${a} apples on a tree and ${b} fall down. How many apples total on the ground?` :
-      `You collected ${a} shells and lost ${b}. How many remain?`,
+      (op==='/' ? `A baker has ${a} apples and puts ${b} apples in each box. How many boxes does he fill?` :
+      `You collected ${a} shells and lost ${b}. How many remain?`),
+    
     ({a,b,op}) => op==='+' ?
       `A class reads ${a} pages on Monday and ${b} pages on Tuesday. How many pages total?` :
-      `A baker made ${a} cupcakes and sold ${b}. How many are left?`
+      (op==='/' ? `A class has ${a} students and they split into groups of ${b}. How many groups are there?` :
+      `A baker made ${a} cupcakes and sold ${b}. How many are left?`)
   ];
   const pick = patterns[Math.floor(Math.random()*patterns.length)];
   return pick(cur);
@@ -443,7 +457,7 @@ function newProblem(){
   if (state.mode === 'visual' && (cur.type === 'arith' || cur.type === 'decompose')) {
     renderVisual(cur);
   } else if (state.mode === 'shortcut_make10' && cur.type === 'arith') {
-  renderMake10Visual(cur);
+    renderMake10Visual(cur);
   }
 
   configureAnswerFieldForMode();
@@ -458,6 +472,8 @@ function newProblem(){
 function renderVisual(cur){
   let n;
   if (cur.type === 'arith'){
+    // For addition: total = a+b. For subtraction: start = a. 
+    // For division (a/b): total start amount = a.
     n = (cur.op === '+') ? (cur.a + cur.b) : cur.a;
   } else {
     n = cur.n;
@@ -466,6 +482,15 @@ function renderVisual(cur){
   const container = document.createElement('div');
   container.className = 'card';
   container.setAttribute('aria-label','ten-frames');
+
+  // If division, maybe show a hint caption
+  if (cur.op === '/') {
+    const cap = document.createElement('div');
+    cap.className = 'hint';
+    cap.style.marginBottom = '8px';
+    cap.textContent = `Total: ${n}. Split into groups of ${cur.b} (or ${cur.b} equal groups).`;
+    container.appendChild(cap);
+  }
 
   const framesCount = Math.ceil(n/10);
   for (let f=0; f<framesCount; f++){

@@ -3,11 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>NumberSense Tutor — v3</title>
+  <title>NumberSense Tutor — v3.1</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <!-- Session chooser overlay -->
   <div id="sessionOverlay" class="overlay" aria-modal="true" role="dialog">
     <div class="overlay-card">
       <h2>NumberSense Tutor</h2>
@@ -44,6 +43,7 @@
             <option value="mix">Mixed (+ and -)</option>
             <option value="add">Addition</option>
             <option value="sub">Subtraction</option>
+            <option value="div">Division</option>
           </select>
         </div>
 
@@ -52,8 +52,6 @@
           <input id="maxNumber" type="number" value="20" min="5" max="100" aria-label="Maximum number" />
         </div>
 
-        <!-- Replacing the old "Hints on/off" dropdown:
-             We now just show a Hint button in that slot, with NO label above it -->
         <div class="hint-slot">
           <button id="hintBtn" class="secondary block-btn" type="button" title="Hint (H)">Hint</button>
         </div>
@@ -68,7 +66,6 @@
         <div id="problemArea" class="big-problem" aria-live="polite">—</div>
         <div id="visualArea" aria-hidden="true"></div>
 
-        <!-- form so Enter submits -->
         <form id="answerForm" class="answer-row">
           <input
             id="answerInput"
@@ -92,23 +89,22 @@
 
     <div class="card">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;width:100%">
-  <div style="display:flex;flex-direction:column;gap:6px;min-width:140px">
-    <strong>Session Progress</strong>
-    <button id="downloadSessionBtn" class="secondary" type="button" title="Download this session data as CSV">
-      Download Session Data
-    </button>
-  </div>
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:140px">
+          <strong>Session Progress</strong>
+          <button id="downloadSessionBtn" class="secondary" type="button" title="Download this session data as CSV">
+            Download Session Data
+          </button>
+        </div>
 
-  <div class="stats">
-    <div class="stat sm">Correct: <span id="statCorrect">0</span></div>
-    <div class="stat sm">Attempted: <span id="statAttempted">0</span></div>
-    <div class="stat sm">Avg time (s): <span id="statAvgTime">0</span></div>
-    <div class="stat sm">Streak: <span id="statStreak">0</span></div>
-  </div>
-</div>
+        <div class="stats">
+          <div class="stat sm">Correct: <span id="statCorrect">0</span></div>
+          <div class="stat sm">Attempted: <span id="statAttempted">0</span></div>
+          <div class="stat sm">Avg time (s): <span id="statAvgTime">0</span></div>
+          <div class="stat sm">Streak: <span id="statStreak">0</span></div>
+        </div>
+      </div>
 
 
-      <!-- History table -->
       <div class="history-wrap">
         <table class="history-table" aria-label="Problem history for this session">
           <thead>
@@ -121,8 +117,7 @@
             </tr>
           </thead>
           <tbody id="historyBody">
-            <!-- rows added dynamically -->
-          </tbody>
+            </tbody>
         </table>
       </div>
 

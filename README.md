@@ -86,5 +86,6 @@ To help students internalize number relationships, develop mental math fluency, 
 
 ## Author
 
-Developed by Edgar  
+Developed by ~~Edgar~~ ChatGPT
 Educational design support by ChatGPT (OpenAI)
+Maintaner for when Edgar gets too lazy to vibe code: BrokenLH

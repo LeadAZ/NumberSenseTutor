@@ -57,7 +57,7 @@ const historyBody      = $('historyBody');
 // runtime state
 const state = {
   mode:       'flash',        // 'flash' | 'visual' | 'word' | 'decompose'
-  op:         'mix',          // 'add' | 'sub' | 'mix' | 'div'
+  op:         'mix',          // 'add' | 'sub' | 'mix' | 'div' | 'mul'
   max:        20,
   current:    null,           // current problem object
   startTime:  null,
@@ -320,6 +320,46 @@ function generateProblem(mode, op, max){
     };
   }
 
+  if (fullop === 'mul') {
+    // MULTIPLICATION GENERATION
+    // We will choose factors a and b such that a * b <= max.
+    const candidates = [];
+    for (let a = 1; a <= max; a++) {
+      for (let b = 1; b <= max; b++) {
+        const prod = a * b;
+        if (prod <= max) {
+          candidates.push({ a, b, prod });
+        }
+      }
+    }
+
+    // Safety fallback: if somehow no candidates, revert to addition
+    if (!candidates.length) {
+      const a = randInt(1, max-1);
+      const b = randInt(1, Math.max(1, max - a));
+      return {
+        type: 'arith',
+        a,
+        b,
+        op: '+',
+        answer: a + b,
+        text: `${a} + ${b} = ?`,
+        hint: getHint({ a, b, op: '+' })
+      };
+    }
+
+    const chosen = candidates[randInt(0, candidates.length - 1)];
+    return {
+      type: 'arith',
+      a: chosen.a,
+      b: chosen.b,
+      op: '×',                             // display symbol
+      answer: chosen.prod,
+      text: `${chosen.a} × ${chosen.b} = ?`,
+      hint: getHint({ a: chosen.a, b: chosen.b, op: '×' })
+    };
+  }
+
   if (fullop === 'add'){
     const a = randInt(1, max-1);
     const b = randInt(1, Math.max(1,max-a));
@@ -361,6 +401,22 @@ function getHint({ a, b, op }) {
   // DIVISION HINTS
   if (op === '/') {
     return `Think multiplication: what number times ${b} equals ${a}? ( ? × ${b} = ${a} )`;
+  }
+
+   // MULTIPLICATION HINTS
+  if (op === '×') {
+    // concept: repeated addition & groups
+    if (a <= 10 && b <= 10) {
+      return `Think of ${a} groups of ${b} (or ${b} groups of ${a}). You can add ${a} ${b} times, or picture an array with ${a} rows and ${b} columns.`;
+    }
+    // one factor small, one larger
+    const bigger = Math.max(a, b);
+    const smaller = Math.min(a, b);
+    if (smaller <= 5) {
+      return `Think repeated addition: start with ${bigger}, then add ${bigger} again and again ${smaller} times in total.`;
+    }
+    // fallback
+    return `Break one number into easier parts. For example, ${a} × ${b} can be split as (${a} × ${Math.floor(b/2)}) + (${a} × ${b - Math.floor(b/2)}).`;
   }
 
   // SUBTRACTION HINTS
@@ -415,20 +471,47 @@ function getHint({ a, b, op }) {
 // Story wording for word mode
 function makeStory(cur){
   const patterns = [
-    ({a,b,op}) => op==='+' ?
-      `You have ${a} toy cars and your friend gives you ${b} more. How many now?` :
-      (op==='/' ? `You have ${a} toy cars and want to share them equally among ${b} friends. How many does each friend get?` :
-      `You had ${a} stickers and gave away ${b}. How many left?`),
-    
-    ({a,b,op}) => op==='+' ?
-      `There are ${a} apples on a tree and ${b} fall down. How many apples total on the ground?` :
-      (op==='/' ? `A baker has ${a} apples and puts ${b} apples in each box. How many boxes does he fill?` :
-      `You collected ${a} shells and lost ${b}. How many remain?`),
-    
-    ({a,b,op}) => op==='+' ?
-      `A class reads ${a} pages on Monday and ${b} pages on Tuesday. How many pages total?` :
-      (op==='/' ? `A class has ${a} students and they split into groups of ${b}. How many groups are there?` :
-      `A baker made ${a} cupcakes and sold ${b}. How many are left?`)
+    ({a,b,op}) => {
+      if (op === '+') {
+        return `You have ${a} toy cars and your friend gives you ${b} more. How many now?`;
+      }
+      if (op === '/') {
+        return `You have ${a} toy cars and want to share them equally among ${b} friends. How many does each friend get?`;
+      }
+      if (op === '×') {
+        return `You have ${a} boxes with ${b} toy cars in each box. How many cars in total?`;
+      }
+      // subtraction default
+      return `You had ${a} stickers and gave away ${b}. How many left?`;
+    },
+
+    ({a,b,op}) => {
+      if (op === '+') {
+        return `There are ${a} apples on a tree and ${b} fall down. How many apples total on the ground?`;
+      }
+      if (op === '/') {
+        return `A baker has ${a} apples and puts ${b} apples in each box. How many boxes does he fill?`;
+      }
+      if (op === '×') {
+        return `There are ${a} rows of chairs with ${b} chairs in each row. How many chairs altogether?`;
+      }
+      // subtraction default
+      return `You collected ${a} shells and lost ${b}. How many remain?`;
+    },
+
+    ({a,b,op}) => {
+      if (op === '+') {
+        return `A class reads ${a} pages on Monday and ${b} pages on Tuesday. How many pages total?`;
+      }
+      if (op === '/') {
+        return `A class has ${a} students and they split into groups of ${b}. How many groups are there?`;
+      }
+      if (op === '×') {
+        return `A gardener plants ${a} rows of flowers with ${b} flowers in each row. How many flowers did they plant?`;
+      }
+      // subtraction default
+      return `A baker made ${a} cupcakes and sold ${b}. How many are left?`;
+    }
   ];
   const pick = patterns[Math.floor(Math.random()*patterns.length)];
   return pick(cur);
@@ -473,8 +556,15 @@ function renderVisual(cur){
   let n;
   if (cur.type === 'arith'){
     // For addition: total = a+b. For subtraction: start = a. 
+    // For multiplication: total = a × b.
     // For division (a/b): total start amount = a.
-    n = (cur.op === '+') ? (cur.a + cur.b) : cur.a;
+    if (cur.op === '+') {
+      n = cur.a + cur.b;
+    } else if (cur.op === '×') {
+      n = cur.a * cur.b;
+    } else {
+      n = cur.a;
+    }
   } else {
     n = cur.n;
   }

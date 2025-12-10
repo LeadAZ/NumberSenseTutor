@@ -17,7 +17,7 @@ It supports these students through visual models, practice modes, and immediate 
 
 ## Features
 
-- Flash Card Mode: Quick recall of addition and subtraction facts.  
+- Flash Card Mode: Quick recall of addition, subtraction, multiplication, and division facts.    
 - Visual Mode: Ten-frame and dot representations to strengthen quantity visualization.  
 - Word Problem Mode: Real-world story problems to improve comprehension.  
 - Decomposition Mode: Practice breaking numbers into pairs that make a total (e.g., 8 = 3 + 5).  

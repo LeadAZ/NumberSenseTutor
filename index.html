@@ -3,124 +3,118 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>NumberSense Tutor — v4</title>
+  <title>NumberSense Tutor — v3.3</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="sessionOverlay" class="overlay" aria-modal="true" role="dialog">
     <div class="overlay-card">
-      <h1>NumberSense</h1>
-      <p style="color:var(--text-muted)">Welcome back! Choose how you want to work today.</p>
+      <h2>NumberSense Tutor</h2>
+      <p>Choose how you want to work today.</p>
       <div class="overlay-actions">
-        <button id="continueSessionBtn">Continue Last Session</button>
-        <button id="newSessionBtn" class="secondary">Start New Session</button>
+        <button id="continueSessionBtn">Continue last session</button>
+        <button id="newSessionBtn" class="secondary">Start new session</button>
       </div>
     </div>
   </div>
 
   <div class="app" aria-hidden="true" id="appShell">
     <header>
-      <h1 id="title">NumberSense</h1>
-      <div class="sub">Math Practice & Decomposition</div>
+      <h1 id="title">NumberSense Tutor</h1>
+      <div class="sub">Practice number sense, decomposition, and story problems</div>
     </header>
 
     <div class="card" aria-labelledby="title">
-      <div class="controls">
+      <div class="controls row">
         <div>
-          <label for="modeSelect">Mode</label>
-          <select id="modeSelect" aria-label="Practice mode">
-            <option value="flash">Flash Cards</option>
-            <option value="visual">Visual (Ten-Frame)</option>
+          <label for="modeSelect">Mode</label><br>
+          <select id="modeSelect" class="mode-btn" aria-label="Practice mode">
+            <option value="flash">Flash Cards (symbolic)</option>
+            <option value="visual">Visual (ten-frame)</option>
             <option value="word">Word Problems</option>
-            <option value="decompose">Decomposition</option>
-            <option value="shortcut_make10">Strategy: Make 10</option>
+            <option value="decompose">Number Decomposition</option>
+            <option value="shortcut_make10">Math Shortcut: Make 10</option>
           </select>
         </div>
 
         <div>
-          <label for="opSelect">Operation</label>
-          <select id="opSelect" aria-label="Operation">
-            <option value="mix">Mixed (+ / -)</option>
+          <label for="opSelect">Operation</label><br>
+          <select id="opSelect" class="mode-btn" aria-label="Operation">
+            <option value="mix">Mixed (+ and -)</option>
             <option value="add">Addition</option>
             <option value="sub">Subtraction</option>
+            <option value="mul">Multiplication</option>
             <option value="div">Division</option>
           </select>
         </div>
 
         <div>
-          <label for="maxNumber">Max Number</label>
-          <input id="maxNumber" type="number" value="20" min="5" max="100" />
+          <label for="maxNumber">Max Number</label><br>
+          <input id="maxNumber" type="number" value="20" min="5" max="100" aria-label="Maximum number" />
         </div>
 
-        <div>
-           <label>&nbsp;</label> <button id="hintBtn" type="button" title="Get a Hint (H)">💡 Show Hint</button>
+        <div class="hint-slot">
+          <button id="hintBtn" class="secondary block-btn" type="button" title="Hint (H)">Hint</button>
+        </div>
+
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="nextBtn" class="" type="button" title="New Problem (N)">New Problem</button>
+          <button id="resetStats" class="secondary" type="button" title="Reset all saved data">Reset All Data</button>
         </div>
       </div>
 
-      <div class="problem-container">
-        <div id="problemArea" class="big-problem">—</div>
+      <div style="margin-top:12px">
+        <div id="problemArea" class="big-problem" aria-live="polite">—</div>
         <div id="visualArea" aria-hidden="true"></div>
+
+        <form id="answerForm" class="answer-row">
+          <input
+            id="answerInput"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9, +]*"
+            placeholder="Type answer"
+            autocomplete="off"
+            aria-label="Your answer"
+          />
+          <button id="checkBtn" type="submit" title="Check (Enter)">Check</button>
+          <div id="timer" class="timer" aria-live="polite">Time: 0s</div>
+        </form>
+
+        <div id="feedback" class="feedback" aria-live="assertive"></div>
+        <div id="hintText" class="hint" aria-live="polite"></div>
       </div>
-
-      <form id="answerForm" class="answer-row">
-        <input
-          id="answerInput"
-          type="text"
-          inputmode="numeric"
-          pattern="[0-9, +]*"
-          placeholder="Answer..."
-          autocomplete="off"
-          aria-label="Your answer"
-        />
-        <button id="checkBtn" type="submit">Check</button>
-        <div id="timer" class="timer">0s</div>
-      </form>
-
-      <div id="feedback" class="feedback" aria-live="assertive"></div>
-      <div id="hintText" class="hint" aria-live="polite"></div>
-
-      <div style="display:flex; justify-content:center; gap:10px; margin-top:20px;">
-          <button id="nextBtn" type="button" title="Skip / New Problem (N)">New Problem ➡</button>
-          <button id="resetStats" class="secondary" type="button" style="font-size:0.8rem">Reset Data</button>
-       </div>
     </div>
 
+    <div style="height:12px"></div>
+
     <div class="card">
-      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-        <h3 style="margin:0; font-size:1.1rem;">Session Progress</h3>
-        <button id="downloadSessionBtn" class="secondary" type="button" style="padding:6px 12px; font-size:0.8rem;">
-          Download CSV
-        </button>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px;width:100%">
+        <div style="display:flex;flex-direction:column;gap:6px;min-width:140px">
+          <strong>Session Progress</strong>
+          <button id="downloadSessionBtn" class="secondary" type="button" title="Download this session data as CSV">
+            Download Session Data
+          </button>
+        </div>
+
+        <div class="stats">
+          <div class="stat sm">Correct: <span id="statCorrect">0</span></div>
+          <div class="stat sm">Attempted: <span id="statAttempted">0</span></div>
+          <div class="stat sm">Avg time (s): <span id="statAvgTime">0</span></div>
+          <div class="stat sm">Streak: <span id="statStreak">0</span></div>
+        </div>
       </div>
 
-      <div class="stats-container">
-        <div class="stat-card">
-          <div class="stat-label">Correct</div>
-          <div class="stat-value" id="statCorrect">0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Attempts</div>
-          <div class="stat-value" id="statAttempted">0</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Avg Time</div>
-          <div class="stat-value"><span id="statAvgTime">0</span>s</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-label">Streak</div>
-          <div class="stat-value" id="statStreak">0</div>
-        </div>
-      </div>
 
       <div class="history-wrap">
-        <table class="history-table" aria-label="Problem history">
+        <table class="history-table" aria-label="Problem history for this session">
           <thead>
             <tr>
               <th>Problem</th>
-              <th>Answer</th>
-              <th>Status</th>
-              <th>Time</th>
-              <th>Hint</th>
+              <th>Your Answer</th>
+              <th>Correct?</th>
+              <th>Time (s)</th>
+              <th>Hint Used?</th>
             </tr>
           </thead>
           <tbody id="historyBody">
@@ -128,8 +122,11 @@
         </table>
       </div>
 
-      <div style="text-align:center; font-size:0.85rem; color:var(--text-muted); margin-top:15px;">
-        <span class="kbd">Enter</span> to check • <span class="kbd">N</span> for new problem • <span class="kbd">H</span> for hint
+      <div class="instructions">
+        <span class="kbd">Enter</span> check and go to next •
+        <span class="kbd">N</span> new problem anytime •
+        <span class="kbd">H</span> show hint.
+        Your session is saved in this browser.
       </div>
     </div>
   </div>

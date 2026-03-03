@@ -1,8 +1,12 @@
-// NumberSense Tutor v3.2
+// NumberSense Tutor v3.4
 // Fixes:
 // - Added Division support to generateProblem, getHint, makeStory, and problemTextForHistory
 // - Division ensures dividends do not exceed Max Number
 // - UI wiring for buttons and keyboard is set up after session start
+// - [v3.4] Fixed repeated-problem bug: added adaptive deduplication queue that
+//   prevents recently-seen problems from appearing again. Queue size scales with
+//   estimated pool size so it never deadlocks on tiny problem spaces
+//   (e.g. shortcut_make10 with low max number).
 
 const SESSIONS_KEY = 'ns_sessions_v1';
 
@@ -67,6 +71,67 @@ const state = {
 
 // current session object
 let currentSession = null;
+
+// -------------------------
+// RECENT PROBLEM DEDUPLICATION (v3.4 fix)
+//
+// Stores the text keys of recently-shown problems so the same problem
+// cannot appear twice in a short window.
+//
+// The window size adapts to the estimated pool for the current
+// mode/op/max combination. This prevents two failure modes:
+//   1. Large pool  → window up to 8, giving good variety.
+//   2. Tiny pool   → window shrinks to ≤ half the pool, so we never
+//      loop forever trying to find a "new" problem that doesn't exist
+//      (e.g. shortcut_make10 with max=12 has only ~6 valid problems).
+// -------------------------
+const recentProblems = [];
+
+function estimatePoolSize(mode, op, max) {
+  if (mode === 'shortcut_make10') {
+    let count = 0;
+    for (let a = 6; a <= 9; a++)
+      for (let b = 1; b <= 9; b++)
+        if (a + b > 10 && a + b <= max) count++;
+    return Math.max(count, 1);
+  }
+  if (mode === 'decompose') {
+    // n ranges from 5..max, each with multiple splits — approximation
+    return Math.max(max - 4, 1);
+  }
+  if (op === 'mul') {
+    let count = 0;
+    for (let a = 1; a <= max; a++)
+      for (let b = 1; b <= max; b++)
+        if (a * b <= max) count++;
+    return Math.max(count, 1);
+  }
+  if (op === 'div') {
+    let count = 0;
+    const maxDiv = Math.min(12, Math.floor(max / 2));
+    for (let b = 2; b <= maxDiv; b++)
+      count += Math.max(Math.floor(max / b), 0);
+    return Math.max(count, 1);
+  }
+  // add / sub / mix — rough estimate
+  return Math.max(Math.floor(max * max / 4), 1);
+}
+
+function recentLimit(mode, op, max) {
+  const pool = estimatePoolSize(mode, op, max);
+  // Keep at most half the pool in the window, hard cap of 8, minimum 1
+  return Math.max(1, Math.min(8, Math.floor(pool / 2)));
+}
+
+function isRecentProblem(prob) {
+  return recentProblems.includes(prob.text);
+}
+
+function recordRecentProblem(prob) {
+  const limit = recentLimit(state.mode, state.op, state.max);
+  recentProblems.push(prob.text);
+  while (recentProblems.length > limit) recentProblems.shift();
+}
 
 /* -------------------------
    SESSION MANAGEMENT
@@ -522,7 +587,18 @@ function makeStory(cur){
 ------------------------- */
 
 function newProblem(){
-  const cur = generateProblem(state.mode, state.op, state.max);
+  // Retry up to 15 times to find a problem not in the recent window.
+  // The retry cap is the safety net for when the pool is genuinely
+  // smaller than the window (e.g. shortcut_make10 + low max number)
+  // — in that case we accept the least-bad repeat rather than looping forever.
+  let cur;
+  const MAX_RETRIES = 15;
+  for (let i = 0; i < MAX_RETRIES; i++) {
+    cur = generateProblem(state.mode, state.op, state.max);
+    if (!isRecentProblem(cur)) break;
+  }
+  recordRecentProblem(cur);
+
   state.current = cur;
   state.startTime = Date.now();
   state.hintUsed = false;
@@ -690,6 +766,7 @@ function checkAnswerAndAdvance(){
   if (!state.current) return;
 
   stopTimer();
+
   const elapsedMs    = Date.now() - state.startTime;
   const totalSeconds = elapsedMs / 1000;
   const timeDisplay  = formatTime(totalSeconds);  // "mm:ss.ss"
@@ -979,11 +1056,13 @@ function wireUI(){
 
   modeSelect.addEventListener('change', (e)=>{
     state.mode = e.target.value;
+    recentProblems.length = 0; // pool changed — reset dedup window
     newProblem();
   });
 
   opSelect.addEventListener('change', (e)=>{
     state.op = e.target.value;
+    recentProblems.length = 0; // pool changed — reset dedup window
     newProblem();
   });
 
@@ -993,6 +1072,7 @@ function wireUI(){
     v = Math.max(5, Math.min(100, v));
     state.max = v;
     maxNumber.value = v;
+    recentProblems.length = 0; // pool changed — reset dedup window
     newProblem();
   });
 }

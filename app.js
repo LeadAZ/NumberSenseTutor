@@ -215,11 +215,26 @@ function celebrateStreak(streak) {
     banner.id = 'streakBanner';
     document.body.appendChild(banner);
   }
-  banner.textContent = msgs[streak] || `${streak} in a row!`;
-  banner.style.opacity = '1';
-  banner.classList.remove('fade-out');
+
+  // Cancel any in-flight timers from a previous celebration
   clearTimeout(banner._t);
-  banner._t = setTimeout(() => banner.classList.add('fade-out'), 2500);
+  clearTimeout(banner._hideT);
+
+  // Snap back to visible — disable transition momentarily so it doesn't animate the reset
+  banner.style.transition = 'none';
+  banner.style.opacity = '1';
+  banner.style.display = 'block';
+  banner.classList.remove('fade-out');
+  banner.textContent = msgs[streak] || `${streak} in a row!`;
+
+  // Re-enable the CSS transition on the next frame
+  requestAnimationFrame(() => { banner.style.transition = ''; });
+
+  // After 2.5s start fade, then fully hide once fade completes (0.5s)
+  banner._t = setTimeout(() => {
+    banner.classList.add('fade-out');
+    banner._hideT = setTimeout(() => { banner.style.display = 'none'; }, 500);
+  }, 2500);
 }
 
 /* -------------------------

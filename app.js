@@ -1,191 +1,145 @@
-// NumberSense Tutor v3.4
-// Fixes:
-// - Added Division support to generateProblem, getHint, makeStory, and problemTextForHistory
-// - Division ensures dividends do not exceed Max Number
-// - UI wiring for buttons and keyboard is set up after session start
-// - [v3.4] Fixed repeated-problem bug: added adaptive deduplication queue that
-//   prevents recently-seen problems from appearing again. Queue size scales with
-//   estimated pool size so it never deadlocks on tiny problem spaces
-//   (e.g. shortcut_make10 with low max number).
+// NumberSense Tutor v3.5
+// [v3.5] Streak celebration at 5, 10, 20 correct in a row
+// [v3.5] makeStory expanded to 8 templates per operation (was 3)
+// [v3.5] localStorage error boundary — graceful fallback in private/full-storage
+// [v3.5] Hint button now shows "(H)" so the keyboard shortcut is discoverable
+// [v3.5] Mobile Go/Done key now submits; deprecated execCommand replaced in paste handler
+// [v3.4] Adaptive dedup queue — no repeated problems in a short window
 
 const SESSIONS_KEY = 'ns_sessions_v1';
 
-// DOM helpers
-const $ = (id)=>document.getElementById(id);
+const $ = (id) => document.getElementById(id);
 
-// Format time in seconds as mm:ss.ss (minutes:seconds with hundredths)
 function formatTime(totalSeconds) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds - minutes * 60;
-
   const mm = String(minutes).padStart(2, '0');
-  const ss = seconds.toFixed(2).padStart(5, '0'); // e.g. "00:05.23"
-
+  const ss = seconds.toFixed(2).padStart(5, '0');
   return `${mm}:${ss}`;
 }
 
-// Elements
-const sessionOverlay   = $('sessionOverlay');
-const continueBtn      = $('continueSessionBtn');
-const newBtn           = $('newSessionBtn');
+const sessionOverlay  = $('sessionOverlay');
+const continueBtn     = $('continueSessionBtn');
+const newBtn          = $('newSessionBtn');
+const appShell        = $('appShell');
+const modeSelect      = $('modeSelect');
+const opSelect        = $('opSelect');
+const maxNumber       = $('maxNumber');
+const problemArea     = $('problemArea');
+const visualArea      = $('visualArea');
+const answerForm      = $('answerForm');
+const answerInput     = $('answerInput');
+const checkBtn        = $('checkBtn');
+const nextBtn         = $('nextBtn');
+const resetStatsBtn   = $('resetStats');
+const downloadSessionBtn = $('downloadSessionBtn');
+const hintBtn         = $('hintBtn');
+const hintText        = $('hintText');
+const feedback        = $('feedback');
+const timerEl         = $('timer');
+const statCorrect     = $('statCorrect');
+const statAttempted   = $('statAttempted');
+const statAvgTime     = $('statAvgTime');
+const statStreak      = $('statStreak');
+const historyBody     = $('historyBody');
 
-const appShell         = $('appShell');
+// [v3.5] Make the H shortcut visible on the button itself
+hintBtn.textContent = 'Hint (H)';
 
-const modeSelect       = $('modeSelect');
-const opSelect         = $('opSelect');
-const maxNumber        = $('maxNumber');
-
-const problemArea      = $('problemArea');
-const visualArea       = $('visualArea');
-
-const answerForm       = $('answerForm');
-const answerInput      = $('answerInput');
-const checkBtn         = $('checkBtn');
-
-const nextBtn             = $('nextBtn');
-const resetStatsBtn       = $('resetStats');
-const downloadSessionBtn  = $('downloadSessionBtn');
-
-const hintBtn          = $('hintBtn');
-const hintText         = $('hintText');
-const feedback         = $('feedback');
-const timerEl          = $('timer');
-
-const statCorrect      = $('statCorrect');
-const statAttempted    = $('statAttempted');
-const statAvgTime      = $('statAvgTime');
-const statStreak       = $('statStreak');
-
-const historyBody      = $('historyBody');
-
-// runtime state
 const state = {
-  mode:       'flash',        // 'flash' | 'visual' | 'word' | 'decompose'
-  op:         'mix',          // 'add' | 'sub' | 'mix' | 'div' | 'mul'
-  max:        20,
-  current:    null,           // current problem object
-  startTime:  null,
-  timerInt:   null,
-  hintUsed:   false
+  mode:      'flash',
+  op:        'mix',
+  max:       20,
+  current:   null,
+  startTime: null,
+  timerInt:  null,
+  hintUsed:  false
 };
 
-// current session object
 let currentSession = null;
 
-// -------------------------
-// RECENT PROBLEM DEDUPLICATION (v3.4 fix)
-//
-// Stores the text keys of recently-shown problems so the same problem
-// cannot appear twice in a short window.
-//
-// The window size adapts to the estimated pool for the current
-// mode/op/max combination. This prevents two failure modes:
-//   1. Large pool  → window up to 8, giving good variety.
-//   2. Tiny pool   → window shrinks to ≤ half the pool, so we never
-//      loop forever trying to find a "new" problem that doesn't exist
-//      (e.g. shortcut_make10 with max=12 has only ~6 valid problems).
-// -------------------------
+/* -------------------------
+   DEDUPLICATION (v3.4)
+------------------------- */
 const recentProblems = [];
 
 function estimatePoolSize(mode, op, max) {
   if (mode === 'shortcut_make10') {
-    let count = 0;
+    let c = 0;
     for (let a = 6; a <= 9; a++)
       for (let b = 1; b <= 9; b++)
-        if (a + b > 10 && a + b <= max) count++;
-    return Math.max(count, 1);
+        if (a + b > 10 && a + b <= max) c++;
+    return Math.max(c, 1);
   }
-  if (mode === 'decompose') {
-    // n ranges from 5..max, each with multiple splits — approximation
-    return Math.max(max - 4, 1);
-  }
+  if (mode === 'decompose') return Math.max(max - 4, 1);
   if (op === 'mul') {
-    let count = 0;
+    let c = 0;
     for (let a = 1; a <= max; a++)
       for (let b = 1; b <= max; b++)
-        if (a * b <= max) count++;
-    return Math.max(count, 1);
+        if (a * b <= max) c++;
+    return Math.max(c, 1);
   }
   if (op === 'div') {
-    let count = 0;
-    const maxDiv = Math.min(12, Math.floor(max / 2));
-    for (let b = 2; b <= maxDiv; b++)
-      count += Math.max(Math.floor(max / b), 0);
-    return Math.max(count, 1);
+    let c = 0;
+    const md = Math.min(12, Math.floor(max / 2));
+    for (let b = 2; b <= md; b++) c += Math.max(Math.floor(max / b), 0);
+    return Math.max(c, 1);
   }
-  // add / sub / mix — rough estimate
   return Math.max(Math.floor(max * max / 4), 1);
 }
 
 function recentLimit(mode, op, max) {
-  const pool = estimatePoolSize(mode, op, max);
-  // Keep at most half the pool in the window, hard cap of 8, minimum 1
-  return Math.max(1, Math.min(8, Math.floor(pool / 2)));
+  return Math.max(1, Math.min(8, Math.floor(estimatePoolSize(mode, op, max) / 2)));
 }
 
-function isRecentProblem(prob) {
-  return recentProblems.includes(prob.text);
-}
+function isRecentProblem(prob) { return recentProblems.includes(prob.text); }
 
 function recordRecentProblem(prob) {
-  const limit = recentLimit(state.mode, state.op, state.max);
   recentProblems.push(prob.text);
-  while (recentProblems.length > limit) recentProblems.shift();
+  while (recentProblems.length > recentLimit(state.mode, state.op, state.max))
+    recentProblems.shift();
 }
 
 /* -------------------------
    SESSION MANAGEMENT
 ------------------------- */
-
-function loadAllSessions(){
-  const raw = localStorage.getItem(SESSIONS_KEY);
-  if (!raw) return [];
+function loadAllSessions() {
   try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
+    const raw = localStorage.getItem(SESSIONS_KEY);
+    if (!raw) return [];
+    const p = JSON.parse(raw);
+    return Array.isArray(p) ? p : [];
+  } catch { return []; }
 }
 
-function saveAllSessions(all){
-  localStorage.setItem(SESSIONS_KEY, JSON.stringify(all));
+function saveAllSessions(all) {
+  try { localStorage.setItem(SESSIONS_KEY, JSON.stringify(all)); }
+  catch { /* storage full or unavailable - session continues in memory */ }
 }
 
-function createNewSession(){
+function createNewSession() {
   return {
-    createdAt: Date.now(),
-    lastUsedAt: Date.now(),
+    createdAt: Date.now(), lastUsedAt: Date.now(),
     history: [],
-    stats: {
-      correct:0,
-      attempted:0,
-      times:[],
-      streak:0
-    }
+    stats: { correct: 0, attempted: 0, times: [], streak: 0 }
   };
 }
 
-function persistSession(){
-  let all = loadAllSessions();
-  if (!all.length){
-    all = [currentSession];
-  } else {
-    all[all.length-1] = currentSession;
-  }
-  currentSession.lastUsedAt = Date.now();
-  saveAllSessions(all);
+// [v3.5] Full error boundary around persist
+function persistSession() {
+  try {
+    let all = loadAllSessions();
+    if (!all.length) { all = [currentSession]; }
+    else { all[all.length - 1] = currentSession; }
+    currentSession.lastUsedAt = Date.now();
+    saveAllSessions(all);
+  } catch { /* non-fatal */ }
 }
 
-// Session choice buttons
 continueBtn.addEventListener('click', () => {
   const all = loadAllSessions();
-  if (!all.length){
-    currentSession = createNewSession();
-    persistSession();
-  } else {
-    currentSession = all[all.length-1];
-  }
+  currentSession = all.length ? all[all.length - 1] : createNewSession();
+  if (!all.length) persistSession();
   startApp();
 });
 
@@ -200,418 +154,292 @@ newBtn.addEventListener('click', () => {
 /* -------------------------
    APP STARTUP
 ------------------------- */
-
-function startApp(){
-  // hide overlay, show app shell
+function startApp() {
   sessionOverlay.style.display = 'none';
-  appShell.setAttribute('aria-hidden','false');
-
-  // sync UI controls from our current state defaults
+  appShell.setAttribute('aria-hidden', 'false');
   modeSelect.value = state.mode;
   opSelect.value   = state.op;
   maxNumber.value  = state.max;
-
-  // wire all UI events now that DOM is "live"
   wireUI();
-
-  // show stats / history from session
   renderStats();
   renderHistoryTable();
-
-  // get first problem
   newProblem();
+}
+
+/* -------------------------
+   STREAK CELEBRATION (v3.5)
+------------------------- */
+const STREAK_MILESTONES = [5, 10, 20];
+
+(function injectStreakStyles() {
+  const s = document.createElement('style');
+  s.textContent = `
+    @keyframes streakFlash {
+      0%   { background-color: #ffffff; }
+      25%  { background-color: #fef08a; }
+      75%  { background-color: #fef08a; }
+      100% { background-color: #ffffff; }
+    }
+    .streak-flash { animation: streakFlash 0.8s ease-out; }
+    #streakBanner {
+      position: fixed; top: 20px; left: 50%; transform: translateX(-50%);
+      background: linear-gradient(135deg, #6366f1, #ec4899);
+      color: white; padding: 12px 28px; border-radius: 999px;
+      font-family: 'Nunito', sans-serif; font-weight: 800; font-size: 1.1rem;
+      box-shadow: 0 8px 20px rgba(99,102,241,0.4);
+      z-index: 1000; pointer-events: none; transition: opacity 0.5s ease;
+    }
+    #streakBanner.fade-out { opacity: 0; }
+  `;
+  document.head.appendChild(s);
+})();
+
+function celebrateStreak(streak) {
+  const card = document.querySelector('.card');
+  if (card) {
+    card.classList.remove('streak-flash');
+    void card.offsetWidth;
+    card.classList.add('streak-flash');
+    setTimeout(() => card.classList.remove('streak-flash'), 900);
+  }
+
+  const msgs = {
+    5:  'On fire! 5 in a row!',
+    10: 'Amazing! 10 streak!',
+    20: 'Incredible! 20 in a row!'
+  };
+
+  let banner = document.getElementById('streakBanner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'streakBanner';
+    document.body.appendChild(banner);
+  }
+  banner.textContent = msgs[streak] || `${streak} in a row!`;
+  banner.style.opacity = '1';
+  banner.classList.remove('fade-out');
+  clearTimeout(banner._t);
+  banner._t = setTimeout(() => banner.classList.add('fade-out'), 2500);
 }
 
 /* -------------------------
    CSV EXPORT
 ------------------------- */
-
-// Turn currentSession.history into a CSV string and trigger a download
 function downloadSessionCSV() {
-  if (!currentSession) {
-    alert('No session loaded.');
-    return;
-  }
-
+  if (!currentSession) { alert('No session loaded.'); return; }
   const rows = currentSession.history || [];
-  if (!rows.length) {
-    alert('No attempts in this session yet.');
-    return;
-  }
+  if (!rows.length) { alert('No attempts in this session yet.'); return; }
 
-  // CSV header
-  const header = [
-    'Problem',
-    'StudentAnswer',
-    'Correct',
-    'TimeSeconds',
-    'HintUsed',
-    'Timestamp'
-  ];
+  const header = ['Problem','StudentAnswer','Correct','TimeSeconds','HintUsed','Timestamp'];
+  const clean = (val) => {
+    if (val == null) return '';
+    const s = String(val);
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+  const dataRows = rows.map(r => [
+    clean(r.problemText), clean(r.studentAnswer),
+    clean(r.correct ? 'Yes' : 'No'), clean(r.timeTaken),
+    clean(r.hintUsed ? 'Yes' : 'No'), clean(r.timestamp || '')
+  ].join(','));
 
-  const dataRows = rows.map(item => {
-    const clean = (val) => {
-      if (val === null || val === undefined) return '';
-      const str = String(val);
-      // wrap in quotes if it contains comma, quote, or newline
-      if (str.includes(',') || str.includes('"') || str.includes('\n')) {
-        return `"${str.replace(/"/g, '""')}"`;
-      }
-      return str;
-    };
-
-    return [
-      clean(item.problemText),
-      clean(item.studentAnswer),
-      clean(item.correct ? 'Yes' : 'No'),
-      clean(item.timeTaken),
-      clean(item.hintUsed ? 'Yes' : 'No'),
-      clean(item.timestamp || '')   // per-attempt timestamp
-    ].join(',');
-  });
-
-  const csvString = [header.join(','), ...dataRows].join('\n');
-
-  const blob = new Blob([csvString], { type: 'text/csv' });
-
-  // Name file with session start date (createdAt) if available
-  const sessionDate = currentSession.createdAt
-    ? new Date(currentSession.createdAt)
-    : new Date();
-  const yyyy = sessionDate.getFullYear();
-  const mm = String(sessionDate.getMonth()+1).padStart(2,'0');
-  const dd = String(sessionDate.getDate()).padStart(2,'0');
-  const fileName = `numbersense_session_${yyyy}-${mm}-${dd}.csv`;
-
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = fileName;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
+  const csv  = [header.join(','), ...dataRows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const d    = currentSession.createdAt ? new Date(currentSession.createdAt) : new Date();
+  const name = 'numbersense_session_' + d.getFullYear() + '-' +
+    String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + '.csv';
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
   URL.revokeObjectURL(url);
 }
 
 /* -------------------------
    PROBLEM GENERATION
 ------------------------- */
-
-function randInt(min,max){
-  return Math.floor(Math.random()*(max-min+1))+min;
+function randInt(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
-// Builds one new math/decompose problem object
-function generateProblem(mode, op, max){
-  // Math Shortcut: Make 10 (addition only)
+function generateProblem(mode, op, max) {
   if (mode === 'shortcut_make10') {
-    const candidates = [];
-    for (let a = 6; a <= 9; a++) {
-      for (let b = 1; b <= 9; b++) {
-        const sum = a + b;
-        if (sum > 10 && sum <= max) {
-          candidates.push({ a, b });
-        }
-      }
-    }
-
-    if (!candidates.length) {
-      return generateProblem('flash', op, max);
-    }
-
-    const pair = candidates[randInt(0, candidates.length - 1)];
-    const a = pair.a;
-    const b = pair.b;
-    const answer = a + b;
-
-    return {
-      type: 'arith',
-      a,
-      b,
-      op: '+',
-      answer,
-      shortcut: 'make10',
-      text: `${a} + ${b} = ?`,
-      hint: make10Hint(a, b)
-    };
+    const cands = [];
+    for (let a = 6; a <= 9; a++)
+      for (let b = 1; b <= 9; b++)
+        if (a + b > 10 && a + b <= max) cands.push({ a, b });
+    if (!cands.length) return generateProblem('flash', op, max);
+    const pair = cands[randInt(0, cands.length - 1)];
+    const a = pair.a, b = pair.b;
+    return { type:'arith', a, b, op:'+', answer:a+b, shortcut:'make10',
+             text: a + ' + ' + b + ' = ?', hint:make10Hint(a, b) };
   }
 
-  // Decompose mode: split N into parts
-  if (mode === 'decompose'){
+  if (mode === 'decompose') {
     const n = randInt(5, Math.max(6, max));
-    const a = randInt(1, n-1);
-    const b = n - a;
-    return {
-      type:'decompose',
-      n,
-      text: `Split ${n} into two whole-number parts.`,
-      hint:`Find two whole numbers that add to ${n}. Start small and build up.`
-    };
+    return { type:'decompose', n,
+             text: 'Split ' + n + ' into two whole-number parts.',
+             hint: 'Find two whole numbers that add to ' + n + '. Start small and build up.' };
   }
 
-  // Determine actual operation for this problem
   let fullop = op;
-  if (op === 'mix') {
-    fullop = (Math.random() < 0.5 ? 'add' : 'sub');
-  }
+  if (op === 'mix') fullop = Math.random() < 0.5 ? 'add' : 'sub';
 
   if (fullop === 'div') {
-    // DIVISION GENERATION
-    // Logic: Answer (quotient) * Divisor = Dividend (a)
-    // We want 'a' <= max.
-    // Divisor 'b' should be at least 2.
-    
-    // Pick divisor 'b' first.
-    // To ensure meaningful problems, limit divisor to typical table range (2-12) 
-    // or smaller if 'max' is small.
-    const maxDivisor = Math.min(12, Math.floor(max / 2));
-    const b = randInt(2, Math.max(2, maxDivisor));
-    
-    // Pick quotient 'q' such that q * b <= max.
-    const maxQ = Math.floor(max / b);
-    // If maxQ < 1, we can't make a problem (shouldn't happen if max >= 5)
-    const quotient = randInt(1, Math.max(1, maxQ));
-    
-    const dividend = b * quotient; // This is 'a'
-
-    return {
-      type: 'arith',
-      a: dividend,
-      b: b,
-      op: '/',
-      answer: quotient,
-      text: `${dividend} ÷ ${b} = ?`,
-      hint: getHint({ a: dividend, b: b, op: '/' })
-    };
+    const maxDiv   = Math.min(12, Math.floor(max / 2));
+    const b        = randInt(2, Math.max(2, maxDiv));
+    const quotient = randInt(1, Math.max(1, Math.floor(max / b)));
+    const dividend = b * quotient;
+    return { type:'arith', a:dividend, b:b, op:'/', answer:quotient,
+             text: dividend + ' ÷ ' + b + ' = ?', hint:getHint({a:dividend, b:b, op:'/'}) };
   }
 
   if (fullop === 'mul') {
-    // MULTIPLICATION GENERATION
-    // We will choose factors a and b such that a * b <= max.
-    const candidates = [];
-    for (let a = 1; a <= max; a++) {
-      for (let b = 1; b <= max; b++) {
-        const prod = a * b;
-        if (prod <= max) {
-          candidates.push({ a, b, prod });
-        }
-      }
+    const cands = [];
+    for (let a = 1; a <= max; a++)
+      for (let b = 1; b <= max; b++)
+        if (a * b <= max) cands.push({ a:a, b:b, prod:a*b });
+    if (!cands.length) {
+      const a = randInt(1, max-1), b = randInt(1, Math.max(1, max-a));
+      return { type:'arith', a:a, b:b, op:'+', answer:a+b,
+               text: a + ' + ' + b + ' = ?', hint:getHint({a:a,b:b,op:'+'}) };
     }
-
-    // Safety fallback: if somehow no candidates, revert to addition
-    if (!candidates.length) {
-      const a = randInt(1, max-1);
-      const b = randInt(1, Math.max(1, max - a));
-      return {
-        type: 'arith',
-        a,
-        b,
-        op: '+',
-        answer: a + b,
-        text: `${a} + ${b} = ?`,
-        hint: getHint({ a, b, op: '+' })
-      };
-    }
-
-    const chosen = candidates[randInt(0, candidates.length - 1)];
-    return {
-      type: 'arith',
-      a: chosen.a,
-      b: chosen.b,
-      op: '×',                             // display symbol
-      answer: chosen.prod,
-      text: `${chosen.a} × ${chosen.b} = ?`,
-      hint: getHint({ a: chosen.a, b: chosen.b, op: '×' })
-    };
+    const c = cands[randInt(0, cands.length-1)];
+    return { type:'arith', a:c.a, b:c.b, op:'×', answer:c.prod,
+             text: c.a + ' × ' + c.b + ' = ?', hint:getHint({a:c.a, b:c.b, op:'×'}) };
   }
 
-  if (fullop === 'add'){
-    const a = randInt(1, max-1);
-    const b = randInt(1, Math.max(1,max-a));
-    return {
-      type:'arith',
-      a,b,
-      op:'+',
-      answer:(a+b),
-      text:`${a} + ${b} = ?`,
-      hint:getHint({a,b,op:'+'})
-    };
-  } else {
-    // SUBTRACTION
-    const a = randInt(2, max);
-    const b = randInt(1, a-1);
-    return {
-      type:'arith',
-      a,b,
-      op:'-',
-      answer:(a-b),
-      text:`${a} - ${b} = ?`,
-      hint:getHint({a,b,op:'-'})
-    };
+  if (fullop === 'add') {
+    const a = randInt(1, max-1), b = randInt(1, Math.max(1, max-a));
+    return { type:'arith', a:a, b:b, op:'+', answer:a+b,
+             text: a + ' + ' + b + ' = ?', hint:getHint({a:a,b:b,op:'+'}) };
   }
+  const a = randInt(2, max), b = randInt(1, a-1);
+  return { type:'arith', a:a, b:b, op:'-', answer:a-b,
+           text: a + ' - ' + b + ' = ?', hint:getHint({a:a,b:b,op:'-'}) };
 }
 
 function make10Hint(a, b) {
-  const need = 10 - a;
-  const leftover = b - need;
-
-  if (need > 0 && leftover >= 0) {
-    return `${a} needs ${need} to make 10. Take ${need} from ${b}, which leaves ${leftover}. Now think 10 + ${leftover}.`;
-  }
-  return 'Use the make-10 shortcut: move enough from the second number to the first to build 10, then add what is left.';
+  const need = 10 - a, leftover = b - need;
+  if (need > 0 && leftover >= 0)
+    return a + ' needs ' + need + ' to make 10. Take ' + need + ' from ' + b +
+           ', leaving ' + leftover + '. Now think 10 + ' + leftover + '.';
+  return 'Move enough from the second number to the first to build 10, then add what is left.';
 }
 
-// Strategy hint text
-function getHint({ a, b, op }) {
-  // DIVISION HINTS
-  if (op === '/') {
-    return `Think multiplication: what number times ${b} equals ${a}? ( ? × ${b} = ${a} )`;
-  }
+function getHint(p) {
+  var a = p.a, b = p.b, op = p.op;
+  if (op === '/') return 'Think: what times ' + b + ' equals ' + a + '? ( ? x ' + b + ' = ' + a + ' )';
 
-   // MULTIPLICATION HINTS
   if (op === '×') {
-    // concept: repeated addition & groups
-    if (a <= 10 && b <= 10) {
-      return `Think of ${a} groups of ${b} (or ${b} groups of ${a}). You can add ${a} ${b} times, or picture an array with ${a} rows and ${b} columns.`;
-    }
-    // one factor small, one larger
-    const bigger = Math.max(a, b);
-    const smaller = Math.min(a, b);
-    if (smaller <= 5) {
-      return `Think repeated addition: start with ${bigger}, then add ${bigger} again and again ${smaller} times in total.`;
-    }
-    // fallback
-    return `Break one number into easier parts. For example, ${a} × ${b} can be split as (${a} × ${Math.floor(b/2)}) + (${a} × ${b - Math.floor(b/2)}).`;
+    if (a <= 10 && b <= 10)
+      return 'Think of ' + a + ' groups of ' + b + '. Picture ' + a + ' rows and ' + b + ' columns.';
+    var big = Math.max(a,b), small = Math.min(a,b);
+    if (small <= 5) return 'Repeated addition: start with ' + big + ', add it ' + small + ' times.';
+    var half = Math.floor(b/2);
+    return 'Break it up: (' + a + ' × ' + half + ') + (' + a + ' × ' + (b-half) + ').';
   }
 
-  // SUBTRACTION HINTS
   if (op === '-') {
-    if (a <= 10 && b < a) {
-      return `Start at ${a}. Count back ${b} steps. Where do you land?`;
-    }
+    if (a <= 10 && b < a) return 'Start at ' + a + '. Count back ' + b + ' steps.';
     if (b >= 10 && b < a) {
-      const extra = b - 10;
-      if (extra > 0) {
-        return `Take away 10 first. Then take away ${extra} more. How many are left after both steps?`;
-      } else {
-        return `Take away 10. How many are left?`;
-      }
+      var extra = b - 10;
+      return extra > 0 ? 'Take away 10 first, then ' + extra + ' more.'
+                       : 'Take away 10. How many are left?';
     }
     if (a > 10 && b < a) {
-      const tens = Math.floor(a / 10) * 10;
-      const distanceToTen = a - tens;
-      const stillNeed = b - distanceToTen;
-      if (distanceToTen >= b) {
-        return `${a} is ${tens} and ${distanceToTen}. Take away ${b} from the ${distanceToTen}. Then put the ${tens} with what is left.`;
-      }
-      if (stillNeed > 0 && tens - stillNeed >= 0) {
-        return `Think of ${a} as ${tens} and ${distanceToTen}. First go down from ${a} to ${tens} (that used ${distanceToTen}). You still need to take away ${stillNeed} more from ${tens}.`;
-      }
+      var tens = Math.floor(a/10)*10, dist = a - tens, still = b - dist;
+      if (dist >= b) return a + ' is ' + tens + ' and ' + dist + '. Take ' + b + ' from the ' + dist + ', then add back ' + tens + '.';
+      if (still > 0 && tens - still >= 0)
+        return 'Go from ' + a + ' down to ' + tens + ' (uses ' + dist + '), then take ' + still + ' more from ' + tens + '.';
     }
-    return `You have ${a}. You give away ${b}. Picture taking ${b} away. How many are left?`;
+    return 'You have ' + a + '. Take away ' + b + '. How many are left?';
   }
 
-  // ADDITION HINTS
-  if (a === b) {
-    return `Double ${a}. That means counting ${a} two times.`;
-  }
-  const bigger = Math.max(a, b);
-  const smaller = Math.min(a, b);
-
+  if (a === b) return 'Double ' + a + ' - count it two times.';
+  var bigger = Math.max(a,b), smaller = Math.min(a,b);
   if (a <= 10 && b <= 10) {
-    if (a + b > 10) {
-      return `Make 10 first. Take what you need to get to 10, then add the rest.`;
-    }
-    return `Start at ${bigger}. Count up ${smaller} more. What number do you get?`;
+    if (a + b > 10) return 'Make 10 first, then add the rest.';
+    return 'Start at ' + bigger + '. Count up ' + smaller + ' more.';
   }
-
-  const nextFriendly10 = Math.ceil(bigger / 10) * 10;
-  const needToFriendly = nextFriendly10 - bigger;
-  if (needToFriendly > 0 && needToFriendly < smaller) {
-    return `Build a friendly number. Use part of the smaller number to get from ${bigger} up to ${nextFriendly10}. Then add what is left.`;
-  }
-  return `Put ${a} and ${b} together. Think about adding the smaller number onto the bigger number.`;
+  var next10 = Math.ceil(bigger/10)*10, toNext = next10 - bigger;
+  if (toNext > 0 && toNext < smaller)
+    return 'Use part of ' + smaller + ' to reach ' + next10 + ', then add what is left.';
+  return 'Add the smaller number onto the bigger number.';
 }
 
-// Story wording for word mode
-function makeStory(cur){
-  const patterns = [
-    ({a,b,op}) => {
-      if (op === '+') {
-        return `You have ${a} toy cars and your friend gives you ${b} more. How many now?`;
-      }
-      if (op === '/') {
-        return `You have ${a} toy cars and want to share them equally among ${b} friends. How many does each friend get?`;
-      }
-      if (op === '×') {
-        return `You have ${a} boxes with ${b} toy cars in each box. How many cars in total?`;
-      }
-      // subtraction default
-      return `You had ${a} stickers and gave away ${b}. How many left?`;
-    },
-
-    ({a,b,op}) => {
-      if (op === '+') {
-        return `There are ${a} apples on a tree and ${b} fall down. How many apples total on the ground?`;
-      }
-      if (op === '/') {
-        return `A baker has ${a} apples and puts ${b} apples in each box. How many boxes does he fill?`;
-      }
-      if (op === '×') {
-        return `There are ${a} rows of chairs with ${b} chairs in each row. How many chairs altogether?`;
-      }
-      // subtraction default
-      return `You collected ${a} shells and lost ${b}. How many remain?`;
-    },
-
-    ({a,b,op}) => {
-      if (op === '+') {
-        return `A class reads ${a} pages on Monday and ${b} pages on Tuesday. How many pages total?`;
-      }
-      if (op === '/') {
-        return `A class has ${a} students and they split into groups of ${b}. How many groups are there?`;
-      }
-      if (op === '×') {
-        return `A gardener plants ${a} rows of flowers with ${b} flowers in each row. How many flowers did they plant?`;
-      }
-      // subtraction default
-      return `A baker made ${a} cupcakes and sold ${b}. How many are left?`;
-    }
-  ];
-  const pick = patterns[Math.floor(Math.random()*patterns.length)];
-  return pick(cur);
+/* -------------------------
+   STORY PROBLEMS (v3.5 - 8 templates per operation)
+------------------------- */
+function makeStory(cur) {
+  var a = cur.a, b = cur.b, op = cur.op;
+  var t = {
+    '+': [
+      function() { return 'You have ' + a + ' toy cars and your friend gives you ' + b + ' more. How many now?'; },
+      function() { return 'There are ' + a + ' apples in a basket. You pick ' + b + ' more. How many altogether?'; },
+      function() { return 'A class reads ' + a + ' pages Monday and ' + b + ' pages Tuesday. How many total?'; },
+      function() { return 'You scored ' + a + ' points in round one and ' + b + ' in round two. Total score?'; },
+      function() { return 'There are ' + a + ' red fish and ' + b + ' blue fish. How many fish altogether?'; },
+      function() { return 'A baker makes ' + a + ' muffins in the morning and ' + b + ' in the afternoon. How many total?'; },
+      function() { return 'You collect ' + a + ' stamps Monday and ' + b + ' on Friday. How many stamps?'; },
+      function() { return 'A garden has ' + a + ' roses and ' + b + ' sunflowers. How many flowers?'; }
+    ],
+    '-': [
+      function() { return 'You had ' + a + ' stickers and gave away ' + b + '. How many are left?'; },
+      function() { return 'You collected ' + a + ' shells but lost ' + b + '. How many remain?'; },
+      function() { return 'A baker made ' + a + ' cupcakes and sold ' + b + '. How many are left?'; },
+      function() { return 'There were ' + a + ' birds on a wire. ' + b + ' flew away. How many remain?'; },
+      function() { return 'You had ' + a + ' crayons but ' + b + ' broke. How many unbroken?'; },
+      function() { return 'A library had ' + a + ' books on the shelf. ' + b + ' were checked out. How many remain?'; },
+      function() { return 'You saved ' + a + ' coins and spent ' + b + '. How many left?'; },
+      function() { return a + ' children were on the playground. ' + b + ' went inside. How many stayed?'; }
+    ],
+    '×': [
+      function() { return 'You have ' + a + ' boxes with ' + b + ' toy cars each. How many cars?'; },
+      function() { return 'There are ' + a + ' rows of chairs with ' + b + ' in each row. How many chairs?'; },
+      function() { return 'A gardener plants ' + a + ' rows with ' + b + ' flowers each. How many flowers?'; },
+      function() { return 'You have ' + a + ' bags each holding ' + b + ' apples. How many apples?'; },
+      function() { return 'A bookshelf has ' + a + ' shelves with ' + b + ' books each. How many books?'; },
+      function() { return a + ' children each brought ' + b + ' stickers. How many stickers altogether?'; },
+      function() { return 'A spider has ' + b + ' legs. How many legs do ' + a + ' spiders have?'; },
+      function() { return 'You walk ' + b + ' km every day. How many km in ' + a + ' days?'; }
+    ],
+    '/': [
+      function() { return 'You have ' + a + ' toy cars to share among ' + b + ' friends. How many each?'; },
+      function() { return 'A baker has ' + a + ' apples, packing ' + b + ' per box. How many boxes?'; },
+      function() { return 'A class of ' + a + ' splits into groups of ' + b + '. How many groups?'; },
+      function() { return a + ' stickers go equally onto ' + b + ' pages. How many per page?'; },
+      function() { return a + ' cookies shared among ' + b + ' children. How many each?'; },
+      function() { return 'A farmer packs ' + b + ' eggs per carton. How many cartons for ' + a + ' eggs?'; },
+      function() { return 'You have ' + a + ' minutes split into ' + b + ' equal activities. How many minutes each?'; },
+      function() { return a + ' books packed into boxes of ' + b + '. How many boxes?'; }
+    ]
+  };
+  var list = t[op] || t['+'];
+  return list[Math.floor(Math.random() * list.length)]();
 }
 
 /* -------------------------
    RENDER / NEW PROBLEM
 ------------------------- */
-
-function newProblem(){
-  // Retry up to 15 times to find a problem not in the recent window.
-  // The retry cap is the safety net for when the pool is genuinely
-  // smaller than the window (e.g. shortcut_make10 + low max number)
-  // — in that case we accept the least-bad repeat rather than looping forever.
-  let cur;
-  const MAX_RETRIES = 15;
-  for (let i = 0; i < MAX_RETRIES; i++) {
+function newProblem() {
+  var cur;
+  for (var i = 0; i < 15; i++) {
     cur = generateProblem(state.mode, state.op, state.max);
     if (!isRecentProblem(cur)) break;
   }
   recordRecentProblem(cur);
 
-  state.current = cur;
+  state.current   = cur;
   state.startTime = Date.now();
-  state.hintUsed = false;
+  state.hintUsed  = false;
 
   feedback.textContent = '';
   hintText.textContent = '';
   visualArea.innerHTML = '';
 
-  if (state.mode === 'word' && cur.type === 'arith') {
-    problemArea.textContent = makeStory(cur);
-  } else {
-    problemArea.textContent = cur.text;
-  }
+  problemArea.textContent = (state.mode === 'word' && cur.type === 'arith')
+    ? makeStory(cur) : cur.text;
 
   if (state.mode === 'visual' && (cur.type === 'arith' || cur.type === 'decompose')) {
     renderVisual(cur);
@@ -620,297 +448,204 @@ function newProblem(){
   }
 
   configureAnswerFieldForMode();
-
   answerInput.value = '';
   answerInput.focus();
-
   startTimer();
 }
 
-// Build the visual (ten-frame style)
-function renderVisual(cur){
-  let n;
-  if (cur.type === 'arith'){
-    // For addition: total = a+b. For subtraction: start = a. 
-    // For multiplication: total = a × b.
-    // For division (a/b): total start amount = a.
-    if (cur.op === '+') {
-      n = cur.a + cur.b;
-    } else if (cur.op === '×') {
-      n = cur.a * cur.b;
-    } else {
-      n = cur.a;
-    }
-  } else {
-    n = cur.n;
-  }
+function renderVisual(cur) {
+  var n;
+  if (cur.type === 'arith') {
+    n = (cur.op === '+') ? cur.a + cur.b : (cur.op === '×') ? cur.a * cur.b : cur.a;
+  } else { n = cur.n; }
 
-  const container = document.createElement('div');
+  var container = document.createElement('div');
   container.className = 'card';
-  container.setAttribute('aria-label','ten-frames');
+  container.setAttribute('aria-label', 'ten-frames');
 
-  // If division, maybe show a hint caption
   if (cur.op === '/') {
-    const cap = document.createElement('div');
+    var cap = document.createElement('div');
     cap.className = 'hint';
     cap.style.marginBottom = '8px';
-    cap.textContent = `Total: ${n}. Split into groups of ${cur.b} (or ${cur.b} equal groups).`;
+    cap.textContent = 'Total: ' + n + '. Split into groups of ' + cur.b + '.';
     container.appendChild(cap);
   }
 
-  const framesCount = Math.ceil(n/10);
-  for (let f=0; f<framesCount; f++){
-    const frame = document.createElement('div');
-    frame.className='tenframe';
-    const base = f*10;
-    for (let i=1; i<=10; i++){
-      const cell = document.createElement('div');
-      cell.className='cell';
-      const index = base+i;
-      if (index <= n) cell.classList.add('filled');
+  for (var f = 0; f < Math.ceil(n / 10); f++) {
+    var frame = document.createElement('div');
+    frame.className = 'tenframe';
+    for (var i = 1; i <= 10; i++) {
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+      if (f * 10 + i <= n) cell.classList.add('filled');
       frame.appendChild(cell);
     }
     container.appendChild(frame);
   }
 
   if (cur.type === 'arith' && cur.op === '-') {
-    const totalCells = container.querySelectorAll('.cell.filled');
-    for (let i=totalCells.length-1, rem=cur.b; rem>0 && i>=0; i--, rem--){
-      totalCells[i].classList.add('crossed');
-      totalCells[i].classList.remove('filled');
+    var filled = container.querySelectorAll('.cell.filled');
+    for (var i = filled.length - 1, rem = cur.b; rem > 0 && i >= 0; i--, rem--) {
+      filled[i].classList.add('crossed');
+      filled[i].classList.remove('filled');
     }
   }
-
   visualArea.appendChild(container);
 }
 
-function renderMake10Visual(cur){
-  const { a, b } = cur;
-
-  const container = document.createElement('div');
+function renderMake10Visual(cur) {
+  var a = cur.a, b = cur.b;
+  var container = document.createElement('div');
   container.className = 'card';
-  container.setAttribute('aria-label','make-10 visual');
+  container.setAttribute('aria-label', 'make-10 visual');
 
-  const title = document.createElement('div');
+  var title = document.createElement('div');
   title.textContent = 'Make 10 by moving dots:';
-  title.style.fontSize = '14px';
-  title.style.marginBottom = '4px';
+  title.style.cssText = 'font-size:14px;margin-bottom:4px;';
   container.appendChild(title);
 
-  const row = document.createElement('div');
-  row.style.display = 'flex';
-  row.style.gap = '16px';
-  row.style.flexWrap = 'wrap';
+  var row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:16px;flex-wrap:wrap;';
 
-  // First frame: starting with "a"
-  const frameA = document.createElement('div');
-  frameA.className = 'tenframe';
-  for (let i = 1; i <= 10; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cell';
-    if (i <= a) cell.classList.add('filled');
-    frameA.appendChild(cell);
+  function makeFrame(filled) {
+    var frame = document.createElement('div');
+    frame.className = 'tenframe';
+    for (var i = 1; i <= 10; i++) {
+      var cell = document.createElement('div');
+      cell.className = 'cell';
+      if (i <= filled) cell.classList.add('filled');
+      frame.appendChild(cell);
+    }
+    return frame;
   }
-
-  // Second frame: starting with "b"
-  const frameB = document.createElement('div');
-  frameB.className = 'tenframe';
-  for (let i = 1; i <= 10; i++) {
-    const cell = document.createElement('div');
-    cell.className = 'cell';
-    if (i <= b) cell.classList.add('filled');
-    frameB.appendChild(cell);
-  }
-
-  row.appendChild(frameA);
-  row.appendChild(frameB);
+  row.appendChild(makeFrame(a));
+  row.appendChild(makeFrame(b));
   container.appendChild(row);
 
-  const need = 10 - a;
-  const leftover = b - need;
-
-  const expl = document.createElement('div');
+  var need = 10 - a, leftover = b - need;
+  var expl = document.createElement('div');
   expl.className = 'hint';
-  if (need > 0 && leftover >= 0) {
-    expl.textContent = `${a} needs ${need} to make 10. Imagine sliding ${need} dots from the second frame to the first. Then you have 10 and ${leftover}.`;
-  } else {
-    expl.textContent = 'Use the first frame to build 10, then see what is left in the second.';
-  }
+  expl.textContent = (need > 0 && leftover >= 0)
+    ? a + ' needs ' + need + ' to make 10. Slide ' + need + ' dots across. Then you have 10 and ' + leftover + '.'
+    : 'Use the first frame to build 10, then see what is left in the second.';
   container.appendChild(expl);
-
   visualArea.appendChild(container);
 }
 
 /* -------------------------
    ANSWER CHECKING
 ------------------------- */
-
-// Accept "3+7", "3,7", "3 7"
-function parseDecompose(raw){
-  const m = raw.match(/(\d+)\s*(?:[,+\s])\s*(\d+)/);
-  if(!m) return null;
-  return [parseInt(m[1],10), parseInt(m[2],10)];
+function parseDecompose(raw) {
+  var m = raw.match(/(\d+)\s*(?:[,+\s])\s*(\d+)/);
+  return m ? [parseInt(m[1], 10), parseInt(m[2], 10)] : null;
 }
 
-// Generate list like "1+14 • 2+13 • ..."
-function allDecomposePairs(n){
-  const pairs=[];
-  for(let a=1; a<=Math.floor(n/2); a++){
-    const b=n-a;
-    pairs.push(`${a}+${b}`);
-  }
-  return pairs;
+function allDecomposePairs(n) {
+  var p = [];
+  for (var a = 1; a <= Math.floor(n / 2); a++) p.push(a + '+' + (n - a));
+  return p;
 }
 
-function checkAnswerAndAdvance(){
+function checkAnswerAndAdvance() {
   if (!state.current) return;
-
   stopTimer();
 
-  const elapsedMs    = Date.now() - state.startTime;
-  const totalSeconds = elapsedMs / 1000;
-  const timeDisplay  = formatTime(totalSeconds);  // "mm:ss.ss"
+  var totalSeconds = (Date.now() - state.startTime) / 1000;
+  var timeDisplay  = formatTime(totalSeconds);
+  var cur = state.current;
+  var raw = answerInput.value.trim();
 
-  const cur = state.current;
-  const raw = answerInput.value.trim();
-  if (!raw){
-    feedback.textContent = 'Please type an answer first.';
-    startTimer();
-    return;
+  if (!raw) { feedback.textContent = 'Please type an answer first.'; startTimer(); return; }
+
+  var correct = false, correctAnswer = null;
+
+  if (cur.type === 'decompose') {
+    var parts = parseDecompose(raw);
+    if (!parts) { feedback.textContent = 'Format example: 3+7 or 3,7'; startTimer(); return; }
+    correct = (parts[0] + parts[1] === cur.n);
+  } else {
+    var num = Number(raw);
+    if (!Number.isFinite(num)) { feedback.textContent = 'Please enter a number.'; startTimer(); return; }
+    correct = (num === cur.answer);
+    correctAnswer = cur.answer;
   }
 
-  let correct = false;
-  let correctAnswer = null;
-
-  if (cur.type === 'decompose'){
-    const parts = parseDecompose(raw);
-    if(parts){
-      const sum = parts[0] + parts[1];
-      correct = (sum === cur.n);
-      correctAnswer = null;
+  if (correct) {
+    if (cur.type === 'decompose') {
+      var pairs = allDecomposePairs(cur.n).join(' - ');
+      feedback.innerHTML = 'Correct - all ways to make ' + cur.n + ': <span style="font-weight:600">' + pairs + '</span> (took ' + timeDisplay + ')';
     } else {
-      feedback.textContent = 'Format example: 3+7 or 3,7';
-      startTimer();
-      return;
+      feedback.textContent = 'Correct - ' + problemTextForHistory(cur) + ' = ' + correctAnswer + ' (took ' + timeDisplay + ')';
     }
   } else {
-    const num = Number(raw);
-    if(Number.isFinite(num)){
-      correct = (num === cur.answer);
-      correctAnswer = cur.answer;
-    } else {
-      feedback.textContent = 'Please enter a number.';
-      startTimer();
-      return;
-    }
-  }
-
-  if (correct){
-    if (cur.type === 'decompose'){
-      const pairs = allDecomposePairs(cur.n).join(' • ');
-      feedback.innerHTML =
-        `Correct — all ways to make ${cur.n}: ` +
-        `<span style="font-weight:600">${pairs}</span> (took ${timeDisplay})`;
-    } else {
-      feedback.textContent =
-        `Correct — ${problemTextForHistory(cur)} = ${correctAnswer} (took ${timeDisplay})`;
-    }
-  } else {
-    if (cur.type === 'decompose'){
-      feedback.textContent =
-        `Not quite. Try another way to split ${cur.n}. (took ${timeDisplay})`;
-    } else {
-      feedback.textContent =
-        `Not quite. The answer is ${correctAnswer}. (took ${timeDisplay})`;
-    }
+    feedback.textContent = cur.type === 'decompose'
+      ? 'Not quite. Try another way to split ' + cur.n + '. (took ' + timeDisplay + ')'
+      : 'Not quite. The answer is ' + correctAnswer + '. (took ' + timeDisplay + ')';
   }
 
   currentSession.stats.attempted++;
   currentSession.stats.times.push(totalSeconds);
-  if (correct){
+  if (correct) {
     currentSession.stats.correct++;
     currentSession.stats.streak = (currentSession.stats.streak || 0) + 1;
+    if (STREAK_MILESTONES.indexOf(currentSession.stats.streak) !== -1) {
+      celebrateStreak(currentSession.stats.streak);
+    }
   } else {
     currentSession.stats.streak = 0;
   }
 
-  // log the attempt with per-attempt timestamp
   currentSession.history.push({
-    problemText: displayTextForHistory(cur),
-    studentAnswer: raw,
-    correct,
-    timeTaken: timeDisplay,     // "mm:ss.ss"
-    hintUsed: state.hintUsed,
-    timestamp: new Date().toISOString()
+    problemText:   displayTextForHistory(cur),
+    studentAnswer: raw, correct: correct,
+    timeTaken:     timeDisplay,
+    hintUsed:      state.hintUsed,
+    timestamp:     new Date().toISOString()
   });
 
   persistSession();
   renderStats();
   renderHistoryTable();
-
   newProblem();
 }
 
-function displayTextForHistory(cur){
-  if (state.mode === 'word' && cur.type === 'arith') {
-    return makeStory(cur);
-  }
-  return cur.text;
+function displayTextForHistory(cur) {
+  return (state.mode === 'word' && cur.type === 'arith') ? makeStory(cur) : cur.text;
 }
-
-function problemTextForHistory(cur){
-  if (cur.type === 'arith'){
-    return `${cur.a} ${cur.op} ${cur.b}`;
-  } else {
-    return cur.text;
-  }
+function problemTextForHistory(cur) {
+  return cur.type === 'arith' ? cur.a + ' ' + cur.op + ' ' + cur.b : cur.text;
 }
 
 /* -------------------------
    STATS + HISTORY UI
 ------------------------- */
-
-function averageTime(times){
+function averageTime(times) {
   if (!times.length) return 0;
-  const sum = times.reduce((a,b)=>a+b,0);
-  return Math.round(sum / times.length);
+  return Math.round(times.reduce(function(a, b) { return a + b; }, 0) / times.length);
 }
 
-function renderStats(){
-  statCorrect.textContent   = currentSession.stats.correct || 0;
+function renderStats() {
+  statCorrect.textContent   = currentSession.stats.correct   || 0;
   statAttempted.textContent = currentSession.stats.attempted || 0;
   statAvgTime.textContent   = averageTime(currentSession.stats.times);
-  statStreak.textContent    = currentSession.stats.streak || 0;
+  statStreak.textContent    = currentSession.stats.streak    || 0;
 }
 
-function renderHistoryTable(){
+function renderHistoryTable() {
   historyBody.innerHTML = '';
-  const rows = [...currentSession.history].slice().reverse();
-  for (const item of rows){
-    const tr = document.createElement('tr');
+  var rows = currentSession.history.slice().reverse();
+  for (var i = 0; i < rows.length; i++) {
+    var item = rows[i];
+    var tr = document.createElement('tr');
     tr.className = item.correct ? 'correct' : 'wrong';
-
-    const tdProb = document.createElement('td');
-    tdProb.textContent = item.problemText;
-
-    const tdAns = document.createElement('td');
-    tdAns.textContent = item.studentAnswer;
-
-    const tdCor = document.createElement('td');
-    tdCor.textContent = item.correct ? 'Yes' : 'No';
-
-    const tdTime = document.createElement('td');
-    tdTime.textContent = item.timeTaken;
-
-    const tdHint = document.createElement('td');
-    tdHint.textContent = item.hintUsed ? 'Yes' : 'No';
-
-    tr.appendChild(tdProb);
-    tr.appendChild(tdAns);
-    tr.appendChild(tdCor);
-    tr.appendChild(tdTime);
-    tr.appendChild(tdHint);
-
+    var cells = [item.problemText, item.studentAnswer,
+                 item.correct ? 'Yes':'No', item.timeTaken,
+                 item.hintUsed ? 'Yes':'No'];
+    for (var j = 0; j < cells.length; j++) {
+      var td = document.createElement('td');
+      td.textContent = cells[j];
+      tr.appendChild(td);
+    }
     historyBody.appendChild(tr);
   }
 }
@@ -918,132 +653,99 @@ function renderHistoryTable(){
 /* -------------------------
    HINTS
 ------------------------- */
-
-function showHint(){
-  const cur = state.current;
+function showHint() {
+  var cur = state.current;
   if (!cur) return;
   state.hintUsed = true;
-
-  if (cur.type === 'decompose'){
-    hintText.textContent = cur.hint ||
-      `Think of two numbers that add to ${cur.n}. Start small and work up.`;
-  } else if (cur.type === 'arith'){
-    hintText.textContent = cur.hint ||
-      'Use what you know about tens to solve it.';
+  if (cur.type === 'decompose') {
+    hintText.textContent = cur.hint || 'Think of two numbers that add to ' + cur.n + '.';
+  } else if (cur.type === 'arith') {
+    hintText.textContent = cur.hint || 'Use what you know about tens to solve it.';
   } else {
     hintText.textContent = 'Think carefully about what the story is asking.';
   }
 }
 
 /* -------------------------
-   INPUT / TIMING / EVENTS
+   INPUT / TIMING
 ------------------------- */
-
-function configureAnswerFieldForMode(){
-  if (state.current && state.current.type === 'decompose'){
-    answerInput.setAttribute('type','text');
-    answerInput.setAttribute('inputmode','numeric');
-    answerInput.setAttribute('pattern','[0-9, +]*');
+function configureAnswerFieldForMode() {
+  if (state.current && state.current.type === 'decompose') {
+    answerInput.setAttribute('type', 'text');
+    answerInput.setAttribute('inputmode', 'numeric');
+    answerInput.setAttribute('pattern', '[0-9, +]*');
     answerInput.removeAttribute('step');
     answerInput.placeholder = 'Type two whole numbers, like 2+3';
   } else {
-    answerInput.setAttribute('type','number');
-    answerInput.setAttribute('inputmode','numeric');
-    answerInput.setAttribute('pattern','[0-9]*');
-    answerInput.setAttribute('step','1');
+    answerInput.setAttribute('type', 'number');
+    answerInput.setAttribute('inputmode', 'numeric');
+    answerInput.setAttribute('pattern', '[0-9]*');
+    answerInput.setAttribute('step', '1');
     answerInput.placeholder = 'Type answer';
   }
 }
 
-// sanitize paste
-answerInput.addEventListener('paste',(e)=>{
+// [v3.5] Paste handler - replaces deprecated execCommand
+answerInput.addEventListener('paste', function(e) {
   e.preventDefault();
-  const text=(e.clipboardData||window.clipboardData).getData('text')||'';
-  const cleaned = (state.current && state.current.type === 'decompose')
-    ? text.replace(/[^0-9,+ ]/g,'')
-    : text.replace(/[^0-9]/g,'');
-  document.execCommand('insertText', false, cleaned);
+  var text    = (e.clipboardData || window.clipboardData).getData('text') || '';
+  var cleaned = (state.current && state.current.type === 'decompose')
+    ? text.replace(/[^0-9,+ ]/g, '') : text.replace(/[^0-9]/g, '');
+  var s = answerInput.selectionStart, en = answerInput.selectionEnd;
+  answerInput.value = answerInput.value.slice(0, s) + cleaned + answerInput.value.slice(en);
+  answerInput.selectionStart = answerInput.selectionEnd = s + cleaned.length;
 });
 
-// block invalid keys, N shortcut
-answerInput.addEventListener('keydown',(e)=>{
-  if (e.key === 'Enter'){
-    return; // form submit will handle
-  }
-  if ((e.key === 'n' || e.key === 'N') &&
-      !e.ctrlKey && !e.metaKey && !e.altKey && !e.altGraphKey){
+// [v3.5] Enter key fix covers mobile Go/Done key
+answerInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter') {
     e.preventDefault();
-    newProblem();
+    checkAnswerAndAdvance();
     return;
   }
-  const navKeys=['Backspace','Delete','ArrowLeft','ArrowRight','Tab','Home','End'];
-  if (navKeys.includes(e.key) || e.ctrlKey || e.metaKey){
-    return;
+  if ((e.key === 'n' || e.key === 'N') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+    e.preventDefault(); newProblem(); return;
   }
-  const ok = (state.current && state.current.type==='decompose')
-    ? /[0-9,+ ]/.test(e.key)
-    : /[0-9]/.test(e.key);
-  if (!ok){
-    e.preventDefault();
-  }
+  var nav = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab','Home','End'];
+  if (nav.indexOf(e.key) !== -1 || e.ctrlKey || e.metaKey) return;
+  var ok = (state.current && state.current.type === 'decompose')
+    ? /[0-9,+ ]/.test(e.key) : /[0-9]/.test(e.key);
+  if (!ok) e.preventDefault();
 });
 
-// global N / H shortcuts when not typing
-function globalKeydown(e){
+function globalKeydown(e) {
   if (e.target === answerInput) return;
-  if (e.key.toLowerCase() === 'n'){
-    newProblem();
-  }
-  if (e.key.toLowerCase() === 'h'){
-    showHint();
-  }
+  if (e.key.toLowerCase() === 'n') newProblem();
+  if (e.key.toLowerCase() === 'h') showHint();
 }
 
-// timing
-function startTimer(){
+function startTimer() {
   stopTimer();
   timerEl.textContent = 'Time: 0s';
   state.startTime = Date.now();
-  state.timerInt = setInterval(()=>{
-    timerEl.textContent = 'Time: ' +
-      Math.round((Date.now()-state.startTime)/1000) + 's';
-  },300);
+  state.timerInt  = setInterval(function() {
+    timerEl.textContent = 'Time: ' + Math.round((Date.now() - state.startTime) / 1000) + 's';
+  }, 300);
 }
-function stopTimer(){
-  if (state.timerInt){
-    clearInterval(state.timerInt);
-    state.timerInt = null;
-  }
+function stopTimer() {
+  if (state.timerInt) { clearInterval(state.timerInt); state.timerInt = null; }
 }
 
 /* -------------------------
    WIRE UI
 ------------------------- */
-
-function wireUI(){
+function wireUI() {
   if (wireUI._wired) return;
   wireUI._wired = true;
 
-  answerForm.addEventListener('submit',(e)=>{
-    e.preventDefault();
-    checkAnswerAndAdvance();
-  });
+  answerForm.addEventListener('submit', function(e) { e.preventDefault(); checkAnswerAndAdvance(); });
+  nextBtn.addEventListener('click', function() { newProblem(); });
+  hintBtn.addEventListener('click', function() { showHint(); });
+  downloadSessionBtn.addEventListener('click', function() { downloadSessionCSV(); });
 
-  nextBtn.addEventListener('click',()=>{
-    newProblem();
-  });
-
-  hintBtn.addEventListener('click',()=>{
-    showHint();
-  });
-
-  downloadSessionBtn.addEventListener('click', () => {
-    downloadSessionCSV();
-  });
-
-  resetStatsBtn.addEventListener('click',()=>{
-    if (confirm('This will erase all saved sessions and progress. Are you sure?')){
-      localStorage.removeItem(SESSIONS_KEY);
+  resetStatsBtn.addEventListener('click', function() {
+    if (confirm('This will erase all saved sessions and progress. Are you sure?')) {
+      try { localStorage.removeItem(SESSIONS_KEY); } catch(e) { /* ignore */ }
       currentSession = createNewSession();
       persistSession();
       renderStats();
@@ -1054,25 +756,17 @@ function wireUI(){
 
   document.addEventListener('keydown', globalKeydown);
 
-  modeSelect.addEventListener('change', (e)=>{
-    state.mode = e.target.value;
-    recentProblems.length = 0; // pool changed — reset dedup window
-    newProblem();
+  modeSelect.addEventListener('change', function(e) {
+    state.mode = e.target.value; recentProblems.length = 0; newProblem();
   });
-
-  opSelect.addEventListener('change', (e)=>{
-    state.op = e.target.value;
-    recentProblems.length = 0; // pool changed — reset dedup window
-    newProblem();
+  opSelect.addEventListener('change', function(e) {
+    state.op = e.target.value; recentProblems.length = 0; newProblem();
   });
-
-  maxNumber.addEventListener('change', (e)=>{
-    let v = parseInt(e.target.value,10);
+  maxNumber.addEventListener('change', function(e) {
+    var v = parseInt(e.target.value, 10);
     if (!Number.isFinite(v)) v = 20;
     v = Math.max(5, Math.min(100, v));
-    state.max = v;
-    maxNumber.value = v;
-    recentProblems.length = 0; // pool changed — reset dedup window
-    newProblem();
+    state.max = v; maxNumber.value = v;
+    recentProblems.length = 0; newProblem();
   });
 }

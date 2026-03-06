@@ -5,6 +5,7 @@ It was designed for learners who need extra practice visualizing quantities, bui
 Live App:  
 https://leadaz.github.io/NumberSenseTutor/
 
+(This is not a good repository to learn off of or fork, as the lead developer of this repo has vibe coded everything, included this README. Please don't use this to learn how to code. Also he says all PRs must be vibe coded also.)
 ## Purpose
 
 This app is built especially for students who:

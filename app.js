@@ -203,12 +203,17 @@ function initSetupOverlay() {
   const all = loadAllSessions();
   const last = all.length ? all[all.length - 1] : null;
 
+  // Pre-fill name from dedicated localStorage key (persists across all sessions)
+  try {
+    const savedName = localStorage.getItem('ns_student_name');
+    if (savedName) studentNameInput.value = savedName;
+  } catch(e) {}
+
   // Pre-fill settings from last session if available
   if (last) {
     setupModeSelect.value = last.lastMode || 'flash';
     setupOpSelect.value   = last.lastOp   || 'mix';
     setupMaxNumber.value  = last.lastMax  || 20;
-    if (last.studentName) studentNameInput.value = last.studentName;
 
     // Show last session summary
     const s = last.stats || {};
@@ -240,7 +245,9 @@ continueBtn.addEventListener('click', () => {
   const all = loadAllSessions();
   currentSession = all.length ? all[all.length - 1] : createNewSession(studentNameInput.value.trim());
   // Update name and last settings on the existing session
-  currentSession.studentName = studentNameInput.value.trim();
+  const _name = studentNameInput.value.trim();
+  currentSession.studentName = _name;
+  try { if (_name) localStorage.setItem('ns_student_name', _name); } catch(e) {}
   currentSession.lastMode    = state.mode;
   currentSession.lastOp      = state.op;
   currentSession.lastMax     = state.max;
@@ -251,7 +258,9 @@ continueBtn.addEventListener('click', () => {
 newBtn.addEventListener('click', () => {
   applySetupValues();
   const all = loadAllSessions();
-  currentSession = createNewSession(studentNameInput.value.trim());
+  const _newName = studentNameInput.value.trim();
+  try { if (_newName) localStorage.setItem('ns_student_name', _newName); } catch(e) {}
+  currentSession = createNewSession(_newName);
   currentSession.lastMode = state.mode;
   currentSession.lastOp   = state.op;
   currentSession.lastMax  = state.max;

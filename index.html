@@ -3,14 +3,53 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>NumberSense Tutor — v3.3</title>
+  <title>NumberSense Tutor — v3.7</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <div id="sessionOverlay" class="overlay" aria-modal="true" role="dialog">
     <div class="overlay-card">
       <h2>NumberSense Tutor</h2>
-      <p>Choose how you want to work today.</p>
+
+      <!-- Last session summary — shown only when a saved session exists -->
+      <div id="lastSessionSummary" style="display:none" class="last-session-summary"></div>
+
+      <!-- Student name -->
+      <div class="setup-row">
+        <label for="studentNameInput">Your name</label>
+        <input id="studentNameInput" type="text" placeholder="e.g. Alex" autocomplete="off" maxlength="40" />
+      </div>
+
+      <!-- Mode -->
+      <div class="setup-row">
+        <label for="setupModeSelect">Mode</label>
+        <select id="setupModeSelect">
+          <option value="flash">Flash Cards (symbolic)</option>
+          <option value="visual">Visual (ten-frame)</option>
+          <option value="word">Word Problems</option>
+          <option value="decompose">Number Decomposition</option>
+          <option value="shortcut_make10">Math Shortcut: Make 10</option>
+        </select>
+      </div>
+
+      <!-- Operation -->
+      <div class="setup-row">
+        <label for="setupOpSelect">Operation</label>
+        <select id="setupOpSelect">
+          <option value="mix">Mixed (+ and −)</option>
+          <option value="add">Addition</option>
+          <option value="sub">Subtraction</option>
+          <option value="mul">Multiplication</option>
+          <option value="div">Division</option>
+        </select>
+      </div>
+
+      <!-- Max number -->
+      <div class="setup-row">
+        <label for="setupMaxNumber">Max Number</label>
+        <input id="setupMaxNumber" type="number" value="20" min="5" max="100" />
+      </div>
+
       <div class="overlay-actions">
         <button id="continueSessionBtn">Continue last session</button>
         <button id="newSessionBtn" class="secondary">Start new session</button>
@@ -64,6 +103,7 @@
       </div>
 
       <div style="margin-top:12px">
+        <div id="progressIndicator" class="progress-indicator" aria-live="polite"></div>
         <div id="problemArea" class="big-problem" aria-live="polite">—</div>
         <div id="visualArea" aria-hidden="true"></div>
 

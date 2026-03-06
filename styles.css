@@ -422,3 +422,88 @@ button {
   #checkBtn { width: 100%; }
   .stats-container { grid-template-columns: 1fr 1fr; }
 }
+
+/* -------------------------
+   v3.7 — Setup overlay additions
+------------------------- */
+.setup-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 14px;
+}
+
+.setup-row label {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.setup-row input,
+.setup-row select {
+  padding: 9px 12px;
+  border: 1.5px solid #e5e7eb;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-family: inherit;
+  background: #fff;
+  transition: border-color 0.15s;
+}
+
+.setup-row input:focus,
+.setup-row select:focus {
+  outline: none;
+  border-color: var(--primary);
+}
+
+.last-session-summary {
+  background: #f0fdf4;
+  border: 1.5px solid #bbf7d0;
+  border-radius: 10px;
+  padding: 10px 14px;
+  font-size: 0.9rem;
+  color: #15803d;
+  margin-bottom: 4px;
+}
+
+.last-session-summary strong {
+  display: block;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #16a34a;
+  margin-bottom: 4px;
+}
+
+/* -------------------------
+   v3.7 — Progress indicator
+------------------------- */
+.progress-indicator {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #6b7280;
+  min-height: 1.4em;
+  margin-bottom: 2px;
+  display: flex;
+  gap: 14px;
+}
+
+.progress-indicator .pi-correct {
+  color: #16a34a;
+}
+
+.progress-indicator .pi-wrong {
+  color: #dc2626;
+}
+
+/* -------------------------
+   v3.7 — Student name in header
+------------------------- */
+#studentNameDisplay {
+  font-size: 0.88rem;
+  color: #6b7280;
+  font-weight: 600;
+  margin-top: 2px;
+}

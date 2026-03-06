@@ -1,4 +1,9 @@
-// NumberSense Tutor v3.6
+// NumberSense Tutor v3.7
+// [v3.7] Setup screen: name, mode/op/max, last-session summary before first problem
+// [v3.7] Timer starts on first keystroke, not on problem load
+// [v3.7] 1-second pause + input lock after wrong answer before advancing
+// [v3.7] Progress indicator: running correct/wrong tally
+// [v3.7] Student name stored on session, shown in header, included in CSV
 // [v3.6] Spaced repetition: missed problems return within 5 problems, retry until correct
 // [v3.6] Session comparison panel: last 5 sessions, accuracy %, attempted, correct, wrong
 // [v3.5] Streak celebration at 5, 10, 20 correct in a row
@@ -23,6 +28,13 @@ function formatTime(totalSeconds) {
 const sessionOverlay  = $('sessionOverlay');
 const continueBtn     = $('continueSessionBtn');
 const newBtn          = $('newSessionBtn');
+// [v3.7] Setup screen elements
+const setupModeSelect  = $('setupModeSelect');
+const setupOpSelect    = $('setupOpSelect');
+const setupMaxNumber   = $('setupMaxNumber');
+const studentNameInput = $('studentNameInput');
+const lastSessionSummary = $('lastSessionSummary');
+const progressIndicator  = $('progressIndicator');
 const appShell        = $('appShell');
 const modeSelect      = $('modeSelect');
 const opSelect        = $('opSelect');
@@ -49,13 +61,14 @@ const historyBody     = $('historyBody');
 hintBtn.textContent = 'Hint (H)';
 
 const state = {
-  mode:      'flash',
-  op:        'mix',
-  max:       20,
-  current:   null,
-  startTime: null,
-  timerInt:  null,
-  hintUsed:  false
+  mode:         'flash',
+  op:           'mix',
+  max:          20,
+  current:      null,
+  startTime:    null,
+  timerInt:     null,
+  hintUsed:     false,
+  timerStarted: false  // [v3.7] true once student starts typing for this problem
 };
 
 let currentSession = null;
@@ -165,9 +178,10 @@ function saveAllSessions(all) {
   catch { /* storage full or unavailable - session continues in memory */ }
 }
 
-function createNewSession() {
+function createNewSession(studentName) {
   return {
     createdAt: Date.now(), lastUsedAt: Date.now(),
+    studentName: studentName || '',
     history: [],
     stats: { correct: 0, attempted: 0, times: [], streak: 0 }
   };
@@ -184,20 +198,70 @@ function persistSession() {
   } catch { /* non-fatal */ }
 }
 
-continueBtn.addEventListener('click', () => {
+// [v3.7] Populate setup overlay from last session settings (or defaults)
+function initSetupOverlay() {
   const all = loadAllSessions();
-  currentSession = all.length ? all[all.length - 1] : createNewSession();
+  const last = all.length ? all[all.length - 1] : null;
+
+  // Pre-fill settings from last session if available
+  if (last) {
+    setupModeSelect.value = last.lastMode || 'flash';
+    setupOpSelect.value   = last.lastOp   || 'mix';
+    setupMaxNumber.value  = last.lastMax  || 20;
+    if (last.studentName) studentNameInput.value = last.studentName;
+
+    // Show last session summary
+    const s = last.stats || {};
+    const attempted = s.attempted || 0;
+    const correct   = s.correct   || 0;
+    const acc       = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+    const d         = last.createdAt ? new Date(last.createdAt) : new Date();
+    const dateStr   = (d.getMonth()+1) + '/' + d.getDate() + '/' + d.getFullYear();
+    lastSessionSummary.style.display = 'block';
+    lastSessionSummary.innerHTML =
+      '<strong>Last session — ' + dateStr + '</strong>' +
+      attempted + ' problems &nbsp;·&nbsp; ' + correct + ' correct' +
+      (attempted > 0 ? ' &nbsp;·&nbsp; <b>' + acc + '%</b> accuracy' : '');
+  } else {
+    // No saved session — hide Continue button, show only New
+    continueBtn.style.display = 'none';
+  }
+}
+
+// Read setup values and apply to state
+function applySetupValues() {
+  state.mode = setupModeSelect.value;
+  state.op   = setupOpSelect.value;
+  state.max  = Math.max(5, Math.min(100, parseInt(setupMaxNumber.value, 10) || 20));
+}
+
+continueBtn.addEventListener('click', () => {
+  applySetupValues();
+  const all = loadAllSessions();
+  currentSession = all.length ? all[all.length - 1] : createNewSession(studentNameInput.value.trim());
+  // Update name and last settings on the existing session
+  currentSession.studentName = studentNameInput.value.trim();
+  currentSession.lastMode    = state.mode;
+  currentSession.lastOp      = state.op;
+  currentSession.lastMax     = state.max;
   if (!all.length) persistSession();
   startApp();
 });
 
 newBtn.addEventListener('click', () => {
+  applySetupValues();
   const all = loadAllSessions();
-  currentSession = createNewSession();
+  currentSession = createNewSession(studentNameInput.value.trim());
+  currentSession.lastMode = state.mode;
+  currentSession.lastOp   = state.op;
+  currentSession.lastMax  = state.max;
   all.push(currentSession);
   saveAllSessions(all);
   startApp();
 });
+
+// Run setup overlay init immediately
+initSetupOverlay();
 
 /* -------------------------
    APP STARTUP
@@ -205,13 +269,28 @@ newBtn.addEventListener('click', () => {
 function startApp() {
   sessionOverlay.style.display = 'none';
   appShell.setAttribute('aria-hidden', 'false');
-  modeSelect.value = state.mode;
-  opSelect.value   = state.op;
-  maxNumber.value  = state.max;
+
+  // Sync in-app selects with setup screen choices
+  modeSelect.value  = state.mode;
+  opSelect.value    = state.op;
+  maxNumber.value   = state.max;
+
+  // [v3.7] Show student name in header if provided
+  const name = (currentSession && currentSession.studentName) ? currentSession.studentName : '';
+  let nameEl = document.getElementById('studentNameDisplay');
+  if (!nameEl) {
+    nameEl = document.createElement('div');
+    nameEl.id = 'studentNameDisplay';
+    const header = document.querySelector('header');
+    if (header) header.appendChild(nameEl);
+  }
+  nameEl.textContent = name ? 'Student: ' + name : '';
+
   wireUI();
   renderStats();
   renderHistoryTable();
   renderSessionComparison();
+  renderProgressIndicator();
   newProblem();
 }
 
@@ -294,15 +373,16 @@ function downloadSessionCSV() {
   const rows = currentSession.history || [];
   if (!rows.length) { alert('No attempts in this session yet.'); return; }
 
-  const header = ['Problem','StudentAnswer','Correct','TimeSeconds','HintUsed','Timestamp'];
+  const header = ['StudentName','Problem','StudentAnswer','Correct','TimeSeconds','HintUsed','Timestamp'];
   const clean = (val) => {
     if (val == null) return '';
     const s = String(val);
     return (s.includes(',') || s.includes('"') || s.includes('\n'))
       ? '"' + s.replace(/"/g, '""') + '"' : s;
   };
+  const studentName = (currentSession && currentSession.studentName) ? currentSession.studentName : '';
   const dataRows = rows.map(r => [
-    clean(r.problemText), clean(r.studentAnswer),
+    clean(studentName), clean(r.problemText), clean(r.studentAnswer),
     clean(r.correct ? 'Yes' : 'No'), clean(r.timeTaken),
     clean(r.hintUsed ? 'Yes' : 'No'), clean(r.timestamp || '')
   ].join(','));
@@ -585,6 +665,26 @@ function renderSessionComparison() {
 }
 
 /* -------------------------
+   PROGRESS INDICATOR (v3.7)
+   Shows running correct / wrong tally for the current session.
+------------------------- */
+function renderProgressIndicator() {
+  if (!currentSession || !progressIndicator) return;
+  const correct  = currentSession.stats.correct   || 0;
+  const attempted = currentSession.stats.attempted || 0;
+  const wrong    = attempted - correct;
+
+  if (attempted === 0) {
+    progressIndicator.innerHTML = '';
+    return;
+  }
+
+  progressIndicator.innerHTML =
+    '<span class="pi-correct">' + correct + ' ✓</span>' +
+    '<span class="pi-wrong">'   + wrong   + ' ✗</span>';
+}
+
+/* -------------------------
    RENDER / NEW PROBLEM
 ------------------------- */
 function newProblem() {
@@ -634,8 +734,13 @@ function newProblem() {
 
   configureAnswerFieldForMode();
   answerInput.value = '';
+  answerInput.disabled = false;
   answerInput.focus();
-  startTimer();
+
+  // [v3.7] Timer starts on first keystroke — show idle state until then
+  stopTimer();
+  state.timerStarted = false;
+  timerEl.textContent = 'Time: —';
 }
 
 function renderVisual(cur) {
@@ -735,22 +840,36 @@ function checkAnswerAndAdvance() {
   if (!state.current) return;
   stopTimer();
 
-  var totalSeconds = (Date.now() - state.startTime) / 1000;
-  var timeDisplay  = formatTime(totalSeconds);
+  // [v3.7] If the student never typed (submitted blank via Enter), use 0s elapsed
+  var totalSeconds = state.timerStarted ? (Date.now() - state.startTime) / 1000 : 0;
+  var timeDisplay  = state.timerStarted ? formatTime(totalSeconds) : '—';
   var cur = state.current;
   var raw = answerInput.value.trim();
 
-  if (!raw) { feedback.textContent = 'Please type an answer first.'; startTimer(); return; }
+  if (!raw) {
+    feedback.textContent = 'Please type an answer first.';
+    // Restart timer only if it was already going
+    if (state.timerStarted) startTimer();
+    return;
+  }
 
   var correct = false, correctAnswer = null;
 
   if (cur.type === 'decompose') {
     var parts = parseDecompose(raw);
-    if (!parts) { feedback.textContent = 'Format example: 3+7 or 3,7'; startTimer(); return; }
+    if (!parts) {
+      feedback.textContent = 'Format example: 3+7 or 3,7';
+      if (state.timerStarted) startTimer();
+      return;
+    }
     correct = (parts[0] + parts[1] === cur.n);
   } else {
     var num = Number(raw);
-    if (!Number.isFinite(num)) { feedback.textContent = 'Please enter a number.'; startTimer(); return; }
+    if (!Number.isFinite(num)) {
+      feedback.textContent = 'Please enter a number.';
+      if (state.timerStarted) startTimer();
+      return;
+    }
     correct = (num === cur.answer);
     correctAnswer = cur.answer;
   }
@@ -758,18 +877,18 @@ function checkAnswerAndAdvance() {
   if (correct) {
     if (cur.type === 'decompose') {
       var pairs = allDecomposePairs(cur.n).join(' - ');
-      feedback.innerHTML = 'Correct - all ways to make ' + cur.n + ': <span style="font-weight:600">' + pairs + '</span> (took ' + timeDisplay + ')';
+      feedback.innerHTML = 'Correct! All ways to make ' + cur.n + ': <span style="font-weight:600">' + pairs + '</span>' + (state.timerStarted ? ' (took ' + timeDisplay + ')' : '');
     } else {
-      feedback.textContent = 'Correct - ' + problemTextForHistory(cur) + ' = ' + correctAnswer + ' (took ' + timeDisplay + ')';
+      feedback.textContent = 'Correct! ' + problemTextForHistory(cur) + ' = ' + correctAnswer + (state.timerStarted ? ' (took ' + timeDisplay + ')' : '');
     }
   } else {
     feedback.textContent = cur.type === 'decompose'
-      ? 'Not quite. Try another way to split ' + cur.n + '. (took ' + timeDisplay + ')'
-      : 'Not quite. The answer is ' + correctAnswer + '. (took ' + timeDisplay + ')';
+      ? 'Not quite — try another way to split ' + cur.n + '.'
+      : 'Not quite — the answer is ' + correctAnswer + '.';
   }
 
   currentSession.stats.attempted++;
-  currentSession.stats.times.push(totalSeconds);
+  if (state.timerStarted) currentSession.stats.times.push(totalSeconds);
   if (correct) {
     currentSession.stats.correct++;
     currentSession.stats.streak = (currentSession.stats.streak || 0) + 1;
@@ -792,11 +911,28 @@ function checkAnswerAndAdvance() {
     timestamp:     new Date().toISOString()
   });
 
+  // Save current mode/op/max so next session can restore them
+  currentSession.lastMode = state.mode;
+  currentSession.lastOp   = state.op;
+  currentSession.lastMax  = state.max;
+
   persistSession();
   renderStats();
   renderHistoryTable();
   renderSessionComparison();
-  newProblem();
+  renderProgressIndicator();
+
+  if (correct) {
+    // Advance immediately on correct
+    newProblem();
+  } else {
+    // [v3.7] 1-second pause on wrong answer — lock input so student reads the feedback
+    answerInput.disabled = true;
+    setTimeout(function() {
+      answerInput.disabled = false;
+      newProblem();
+    }, 1000);
+  }
 }
 
 function displayTextForHistory(cur) {
@@ -886,6 +1022,15 @@ answerInput.addEventListener('paste', function(e) {
   answerInput.selectionStart = answerInput.selectionEnd = s + cleaned.length;
 });
 
+
+// [v3.7] Start timer on first keystroke — not on problem load
+answerInput.addEventListener('input', function() {
+  if (!state.timerStarted && state.current) {
+    state.timerStarted = true;
+    startTimer();
+  }
+});
+
 // [v3.5] Enter key fix covers mobile Go/Done key
 answerInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') {
@@ -948,16 +1093,17 @@ function wireUI() {
   document.addEventListener('keydown', globalKeydown);
 
   modeSelect.addEventListener('change', function(e) {
-    state.mode = e.target.value; recentProblems.length = 0; missedQueue.length = 0; newProblem();
+    state.mode = e.target.value; if (currentSession) currentSession.lastMode = state.mode; recentProblems.length = 0; missedQueue.length = 0; newProblem();
   });
   opSelect.addEventListener('change', function(e) {
-    state.op = e.target.value; recentProblems.length = 0; missedQueue.length = 0; newProblem();
+    state.op = e.target.value; if (currentSession) currentSession.lastOp = state.op; recentProblems.length = 0; missedQueue.length = 0; newProblem();
   });
   maxNumber.addEventListener('change', function(e) {
     var v = parseInt(e.target.value, 10);
     if (!Number.isFinite(v)) v = 20;
     v = Math.max(5, Math.min(100, v));
     state.max = v; maxNumber.value = v;
+    if (currentSession) currentSession.lastMax = state.max;
     recentProblems.length = 0; missedQueue.length = 0; newProblem();
   });
 }

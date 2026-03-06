@@ -1,4 +1,6 @@
-// NumberSense Tutor v3.5
+// NumberSense Tutor v3.6
+// [v3.6] Spaced repetition: missed problems return within 5 problems, retry until correct
+// [v3.6] Session comparison panel: last 5 sessions, accuracy %, attempted, correct, wrong
 // [v3.5] Streak celebration at 5, 10, 20 correct in a row
 // [v3.5] makeStory expanded to 8 templates per operation (was 3)
 // [v3.5] localStorage error boundary — graceful fallback in private/full-storage
@@ -100,6 +102,52 @@ function recordRecentProblem(prob) {
     recentProblems.shift();
 }
 
+
+/* -------------------------
+   SPACED REPETITION (v3.6)
+   Missed problems are stored in missedQueue with a countdown.
+   Each entry: { prob, dueAfter }
+   - dueAfter counts down by 1 each time a new problem is served.
+   - When dueAfter reaches 0 the problem is served next.
+   - Answered correctly -> removed from queue.
+   - Answered wrong again -> dueAfter reset to MISSED_INTERVAL (retry in 5).
+   - Queue is cleared when mode/op/max changes (stale problems).
+------------------------- */
+const MISSED_INTERVAL = 5;
+const missedQueue = [];
+
+function enqueueMissed(prob) {
+  // Avoid duplicate entries for the same problem text
+  var existing = null;
+  for (var i = 0; i < missedQueue.length; i++) {
+    if (missedQueue[i].prob.text === prob.text) { existing = missedQueue[i]; break; }
+  }
+  if (existing) {
+    existing.dueAfter = MISSED_INTERVAL; // reset countdown
+  } else {
+    missedQueue.push({ prob: prob, dueAfter: MISSED_INTERVAL });
+  }
+}
+
+function tickMissedQueue() {
+  for (var i = 0; i < missedQueue.length; i++) {
+    if (missedQueue[i].dueAfter > 0) missedQueue[i].dueAfter--;
+  }
+}
+
+function getDueMissedProblem() {
+  for (var i = 0; i < missedQueue.length; i++) {
+    if (missedQueue[i].dueAfter === 0) return missedQueue[i].prob;
+  }
+  return null;
+}
+
+function removeMissedProblem(probText) {
+  for (var i = missedQueue.length - 1; i >= 0; i--) {
+    if (missedQueue[i].prob.text === probText) { missedQueue.splice(i, 1); return; }
+  }
+}
+
 /* -------------------------
    SESSION MANAGEMENT
 ------------------------- */
@@ -163,6 +211,7 @@ function startApp() {
   wireUI();
   renderStats();
   renderHistoryTable();
+  renderSessionComparison();
   newProblem();
 }
 
@@ -434,16 +483,126 @@ function makeStory(cur) {
   return list[Math.floor(Math.random() * list.length)]();
 }
 
+
+/* -------------------------
+   SESSION COMPARISON (v3.6)
+   Reads all saved sessions from localStorage and renders a compact
+   summary table of the last 5 sessions below the history table.
+   Columns: Date, Attempted, Correct, Wrong, Accuracy %
+------------------------- */
+
+(function injectSessionPanelStyles() {
+  var s = document.createElement('style');
+  s.textContent = [
+    '.session-comparison { margin-top: 24px; }',
+    '.session-comparison summary {',
+    '  cursor: pointer; font-weight: 700; font-size: 0.95rem;',
+    '  color: #6366f1; user-select: none; padding: 4px 0;',
+    '  list-style: none; display: flex; align-items: center; gap: 6px;',
+    '}',
+    '.session-comparison summary::-webkit-details-marker { display: none; }',
+    '.session-comparison summary::before { content: "▶"; font-size: 0.7rem; transition: transform 0.2s; }',
+    '.session-comparison[open] summary::before { transform: rotate(90deg); }',
+    '.session-comparison-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.88rem; }',
+    '.session-comparison-table th { text-align: left; padding: 5px 8px;',
+    '  border-bottom: 2px solid #e5e7eb; color: #6b7280; font-weight: 600; }',
+    '.session-comparison-table td { padding: 5px 8px; border-bottom: 1px solid #f3f4f6; }',
+    '.session-comparison-table tr:last-child td { border-bottom: none; }',
+    '.session-comparison-table tr.current-session td { font-weight: 700; color: #6366f1; }',
+    '.acc-high { color: #16a34a; font-weight: 700; }',
+    '.acc-mid  { color: #d97706; font-weight: 700; }',
+    '.acc-low  { color: #dc2626; font-weight: 700; }'
+  ].join('\n');
+  document.head.appendChild(s);
+})();
+
+function renderSessionComparison() {
+  // Remove existing panel so we always render fresh
+  var existing = document.getElementById('sessionComparisonPanel');
+  if (existing) existing.remove();
+
+  var all = loadAllSessions();
+  if (all.length < 1) return; // nothing to compare yet
+
+  // Take the last 5 sessions (most recent last in array)
+  var recent = all.slice(-5).reverse(); // most recent first
+
+  var details = document.createElement('details');
+  details.id = 'sessionComparisonPanel';
+  details.className = 'session-comparison';
+
+  var summary = document.createElement('summary');
+  summary.textContent = 'Session History (last ' + recent.length + ')';
+  details.appendChild(summary);
+
+  var table = document.createElement('table');
+  table.className = 'session-comparison-table';
+
+  // Header
+  var thead = document.createElement('thead');
+  thead.innerHTML = '<tr>' +
+    '<th>Date</th>' +
+    '<th>Attempted</th>' +
+    '<th>Correct</th>' +
+    '<th>Wrong</th>' +
+    '<th>Accuracy</th>' +
+    '</tr>';
+  table.appendChild(thead);
+
+  var tbody = document.createElement('tbody');
+  for (var i = 0; i < recent.length; i++) {
+    var sess = recent[i];
+    var stats = sess.stats || {};
+    var attempted = stats.attempted || 0;
+    var correct   = stats.correct   || 0;
+    var wrong     = attempted - correct;
+    var acc       = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+    var accClass  = acc >= 80 ? 'acc-high' : acc >= 60 ? 'acc-mid' : 'acc-low';
+
+    var d = sess.createdAt ? new Date(sess.createdAt) : new Date(0);
+    var dateStr = (d.getMonth() + 1) + '/' + d.getDate() + '/' + String(d.getFullYear()).slice(-2);
+
+    var tr = document.createElement('tr');
+    // Highlight the current session
+    if (sess === currentSession || (currentSession && sess.createdAt === currentSession.createdAt)) {
+      tr.className = 'current-session';
+      dateStr += ' ★';
+    }
+
+    tr.innerHTML = '<td>' + dateStr + '</td>' +
+      '<td>' + attempted + '</td>' +
+      '<td>' + correct + '</td>' +
+      '<td>' + wrong + '</td>' +
+      '<td class="' + accClass + '">' + (attempted > 0 ? acc + '%' : '—') + '</td>';
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  details.appendChild(table);
+
+  // Insert after the history-wrap div
+  var histWrap = historyBody.closest('.history-wrap') || historyBody.parentNode;
+  histWrap.parentNode.insertBefore(details, histWrap.nextSibling);
+}
+
 /* -------------------------
    RENDER / NEW PROBLEM
 ------------------------- */
 function newProblem() {
   var cur;
-  for (var i = 0; i < 15; i++) {
-    cur = generateProblem(state.mode, state.op, state.max);
-    if (!isRecentProblem(cur)) break;
+
+  // [v3.6] Spaced repetition: serve a due missed problem first if one is ready
+  var dueMissed = getDueMissedProblem();
+  if (dueMissed) {
+    cur = Object.assign({}, dueMissed, { _isRetry: true });
+  } else {
+    // Tick the missed queue countdown whenever a fresh problem is served
+    tickMissedQueue();
+    for (var i = 0; i < 15; i++) {
+      cur = generateProblem(state.mode, state.op, state.max);
+      if (!isRecentProblem(cur)) break;
+    }
+    recordRecentProblem(cur);
   }
-  recordRecentProblem(cur);
 
   state.current   = cur;
   state.startTime = Date.now();
@@ -452,6 +611,17 @@ function newProblem() {
   feedback.textContent = '';
   hintText.textContent = '';
   visualArea.innerHTML = '';
+
+  // [v3.6] Show a subtle retry label if this is a spaced-repetition revisit
+  var retryLabel = document.getElementById('retryLabel');
+  if (!retryLabel) {
+    retryLabel = document.createElement('div');
+    retryLabel.id = 'retryLabel';
+    retryLabel.style.cssText = 'font-size:0.78rem;color:#f59e0b;font-weight:700;' +
+      'letter-spacing:0.05em;text-transform:uppercase;margin-bottom:4px;min-height:1.1em;';
+    problemArea.parentNode.insertBefore(retryLabel, problemArea);
+  }
+  retryLabel.textContent = cur._isRetry ? "↩ Let's try this one again" : '';
 
   problemArea.textContent = (state.mode === 'word' && cur.type === 'arith')
     ? makeStory(cur) : cur.text;
@@ -606,8 +776,12 @@ function checkAnswerAndAdvance() {
     if (STREAK_MILESTONES.indexOf(currentSession.stats.streak) !== -1) {
       celebrateStreak(currentSession.stats.streak);
     }
+    // [v3.6] Correct answer — remove from missed queue if it was a retry
+    removeMissedProblem(cur.text);
   } else {
     currentSession.stats.streak = 0;
+    // [v3.6] Wrong answer — add/reset in missed queue so it returns within 5 problems
+    enqueueMissed(cur);
   }
 
   currentSession.history.push({
@@ -621,6 +795,7 @@ function checkAnswerAndAdvance() {
   persistSession();
   renderStats();
   renderHistoryTable();
+  renderSessionComparison();
   newProblem();
 }
 
@@ -762,6 +937,7 @@ function wireUI() {
     if (confirm('This will erase all saved sessions and progress. Are you sure?')) {
       try { localStorage.removeItem(SESSIONS_KEY); } catch(e) { /* ignore */ }
       currentSession = createNewSession();
+      recentProblems.length = 0; missedQueue.length = 0;
       persistSession();
       renderStats();
       renderHistoryTable();
@@ -772,16 +948,16 @@ function wireUI() {
   document.addEventListener('keydown', globalKeydown);
 
   modeSelect.addEventListener('change', function(e) {
-    state.mode = e.target.value; recentProblems.length = 0; newProblem();
+    state.mode = e.target.value; recentProblems.length = 0; missedQueue.length = 0; newProblem();
   });
   opSelect.addEventListener('change', function(e) {
-    state.op = e.target.value; recentProblems.length = 0; newProblem();
+    state.op = e.target.value; recentProblems.length = 0; missedQueue.length = 0; newProblem();
   });
   maxNumber.addEventListener('change', function(e) {
     var v = parseInt(e.target.value, 10);
     if (!Number.isFinite(v)) v = 20;
     v = Math.max(5, Math.min(100, v));
     state.max = v; maxNumber.value = v;
-    recentProblems.length = 0; newProblem();
+    recentProblems.length = 0; missedQueue.length = 0; newProblem();
   });
 }

@@ -1,6 +1,6 @@
 // NumberSense Tutor v3.7
 // [v3.7] Setup screen: name, mode/op/max, last-session summary before first problem
-// [v3.7] Timer starts on first keystroke, not on problem load
+// [v3.8] Timer starts when the problem is displayed, not on first keystroke
 // [v3.7] 1-second pause + input lock after wrong answer before advancing
 // [v3.7] Progress indicator: running correct/wrong tally
 // [v3.7] Student name stored on session, shown in header, included in CSV
@@ -68,7 +68,7 @@ const state = {
   startTime:    null,
   timerInt:     null,
   hintUsed:     false,
-  timerStarted: false  // [v3.7] true once student starts typing for this problem
+  timerStarted: false  // true once a problem has been shown and its timer started
 };
 
 let currentSession = null;
@@ -714,7 +714,6 @@ function newProblem() {
   }
 
   state.current   = cur;
-  state.startTime = Date.now();
   state.hintUsed  = false;
 
   feedback.textContent = '';
@@ -746,10 +745,9 @@ function newProblem() {
   answerInput.disabled = false;
   answerInput.focus();
 
-  // [v3.7] Timer starts on first keystroke — show idle state until then
-  stopTimer();
-  state.timerStarted = false;
-  timerEl.textContent = 'Time: —';
+  // [v3.8] Timer starts as soon as the problem is shown
+  state.timerStarted = true;
+  startTimer();
 }
 
 function renderVisual(cur) {
@@ -849,16 +847,15 @@ function checkAnswerAndAdvance() {
   if (!state.current) return;
   stopTimer();
 
-  // [v3.7] If the student never typed (submitted blank via Enter), use 0s elapsed
-  var totalSeconds = state.timerStarted ? (Date.now() - state.startTime) / 1000 : 0;
-  var timeDisplay  = state.timerStarted ? formatTime(totalSeconds) : '—';
+  var totalSeconds = (Date.now() - state.startTime) / 1000;
+  var timeDisplay  = formatTime(totalSeconds);
   var cur = state.current;
   var raw = answerInput.value.trim();
 
   if (!raw) {
     feedback.textContent = 'Please type an answer first.';
-    // Restart timer only if it was already going
-    if (state.timerStarted) startTimer();
+    // Timer keeps running across the empty-submit — reading/thinking time still counts
+    resumeTimer();
     return;
   }
 
@@ -868,7 +865,7 @@ function checkAnswerAndAdvance() {
     var parts = parseDecompose(raw);
     if (!parts) {
       feedback.textContent = 'Format example: 3+7 or 3,7';
-      if (state.timerStarted) startTimer();
+      resumeTimer();
       return;
     }
     correct = (parts[0] + parts[1] === cur.n);
@@ -876,7 +873,7 @@ function checkAnswerAndAdvance() {
     var num = Number(raw);
     if (!Number.isFinite(num)) {
       feedback.textContent = 'Please enter a number.';
-      if (state.timerStarted) startTimer();
+      resumeTimer();
       return;
     }
     correct = (num === cur.answer);
@@ -886,9 +883,9 @@ function checkAnswerAndAdvance() {
   if (correct) {
     if (cur.type === 'decompose') {
       var pairs = allDecomposePairs(cur.n).join(' - ');
-      feedback.innerHTML = 'Correct! All ways to make ' + cur.n + ': <span style="font-weight:600">' + pairs + '</span>' + (state.timerStarted ? ' (took ' + timeDisplay + ')' : '');
+      feedback.innerHTML = 'Correct! All ways to make ' + cur.n + ': <span style="font-weight:600">' + pairs + '</span> (took ' + timeDisplay + ')';
     } else {
-      feedback.textContent = 'Correct! ' + problemTextForHistory(cur) + ' = ' + correctAnswer + (state.timerStarted ? ' (took ' + timeDisplay + ')' : '');
+      feedback.textContent = 'Correct! ' + problemTextForHistory(cur) + ' = ' + correctAnswer + ' (took ' + timeDisplay + ')';
     }
   } else {
     feedback.textContent = cur.type === 'decompose'
@@ -897,7 +894,7 @@ function checkAnswerAndAdvance() {
   }
 
   currentSession.stats.attempted++;
-  if (state.timerStarted) currentSession.stats.times.push(totalSeconds);
+  currentSession.stats.times.push(totalSeconds);
   if (correct) {
     currentSession.stats.correct++;
     currentSession.stats.streak = (currentSession.stats.streak || 0) + 1;
@@ -1032,14 +1029,6 @@ answerInput.addEventListener('paste', function(e) {
 });
 
 
-// [v3.7] Start timer on first keystroke — not on problem load
-answerInput.addEventListener('input', function() {
-  if (!state.timerStarted && state.current) {
-    state.timerStarted = true;
-    startTimer();
-  }
-});
-
 // [v3.5] Enter key fix covers mobile Go/Done key
 answerInput.addEventListener('keydown', function(e) {
   if (e.key === 'Enter') {
@@ -1073,6 +1062,14 @@ function startTimer() {
 }
 function stopTimer() {
   if (state.timerInt) { clearInterval(state.timerInt); state.timerInt = null; }
+}
+// [v3.8] Resume the display interval WITHOUT resetting state.startTime,
+// so an invalid/blank submission doesn't zero out elapsed time.
+function resumeTimer() {
+  if (state.timerInt) return;
+  state.timerInt = setInterval(function() {
+    timerEl.textContent = 'Time: ' + Math.round((Date.now() - state.startTime) / 1000) + 's';
+  }, 300);
 }
 
 /* -------------------------

@@ -1073,6 +1073,299 @@ function resumeTimer() {
 }
 
 /* -------------------------
+   TIMED TESTS (v3.9)
+   Fixed-length fluency test: one operation, straight through (default 100
+   problems). Unlike practice mode, the clock runs continuously for the
+   whole test rather than resetting per problem — mirrors a classroom
+   timed test. No hints, no per-problem feedback, no spaced repetition;
+   results (score, total time, missed problems) are shown at the end and
+   saved separately from practice sessions so they don't skew averages.
+------------------------- */
+const TESTS_KEY = 'ns_tests_v1';
+const OP_LABELS = { add: 'Addition', sub: 'Subtraction', mul: 'Multiplication', div: 'Division' };
+
+const testSetupOverlay        = $('testSetupOverlay');
+const testOpSelect             = $('testOpSelect');
+const testCountInput           = $('testCount');
+const testMaxInput             = $('testMax');
+const testStartBtn             = $('testStartBtn');
+const testCancelBtn            = $('testCancelBtn');
+const openTestSetupBtn         = $('openTestSetupBtn');
+const openTestSetupFromHomeBtn = $('openTestSetupFromHomeBtn');
+
+const testScreen        = $('testScreen');
+const testTitleEl       = $('testTitle');
+const testProgressEl    = $('testProgress');
+const testTimerEl       = $('testTimer');
+const testProblemArea   = $('testProblemArea');
+const testAnswerForm    = $('testAnswerForm');
+const testAnswerInput   = $('testAnswerInput');
+const testQuitBtn       = $('testQuitBtn');
+
+const testResultsOverlay = $('testResultsOverlay');
+const testResultsSummary = $('testResultsSummary');
+const testMissedWrap      = $('testMissedWrap');
+const testMissedBody      = $('testMissedBody');
+const downloadTestBtn     = $('downloadTestBtn');
+const retakeTestBtn       = $('retakeTestBtn');
+const backToPracticeBtn   = $('backToPracticeBtn');
+
+let testState = null; // null whenever no test is in progress
+
+function loadAllTests() {
+  try {
+    const raw = localStorage.getItem(TESTS_KEY);
+    const p = raw ? JSON.parse(raw) : [];
+    return Array.isArray(p) ? p : [];
+  } catch (e) { return []; }
+}
+function saveAllTests(all) {
+  try { localStorage.setItem(TESTS_KEY, JSON.stringify(all)); } catch (e) { /* non-fatal */ }
+}
+
+function hideAllScreens() {
+  sessionOverlay.style.display = 'none';
+  appShell.setAttribute('aria-hidden', 'true');
+  testSetupOverlay.style.display = 'none';
+  testScreen.style.display = 'none';
+  testResultsOverlay.style.display = 'none';
+}
+
+// Return to whichever "home" screen makes sense: the practice app if a
+// session is active, otherwise the initial setup overlay.
+function returnToHome() {
+  hideAllScreens();
+  if (currentSession) {
+    appShell.setAttribute('aria-hidden', 'false');
+  } else {
+    sessionOverlay.style.display = 'flex';
+  }
+}
+
+function openTestSetup() {
+  hideAllScreens();
+  testSetupOverlay.style.display = 'flex';
+}
+
+function startTest() {
+  const op    = testOpSelect.value;
+  const validCounts = [10,20,30,40,50,60,70,80,90,100];
+  let count = parseInt(testCountInput.value, 10);
+  if (!validCounts.includes(count)) count = 100;
+  const max   = Math.max(5, Math.min(100, parseInt(testMaxInput.value, 10) || 12));
+  testCountInput.value = count;
+  testMaxInput.value   = max;
+
+  testState = {
+    op: op, max: max, total: count,
+    index: 0, correctCount: 0, wrongCount: 0,
+    times: [], missed: [],
+    current: null,
+    startTime: null, problemStart: null, timerInt: null,
+    totalSeconds: 0, lastRecord: null
+  };
+
+  hideAllScreens();
+  testScreen.style.display = 'flex';
+  testTitleEl.textContent = 'Timed Test — ' + OP_LABELS[op];
+
+  testState.startTime = Date.now();
+  testState.timerInt = setInterval(updateTestTimerDisplay, 200);
+  updateTestTimerDisplay();
+
+  testNextProblem();
+}
+
+function updateTestTimerDisplay() {
+  if (!testState) return;
+  testTimerEl.textContent = 'Time: ' + formatTime((Date.now() - testState.startTime) / 1000);
+}
+
+function testNextProblem() {
+  if (!testState) return;
+  // Straight arithmetic fluency drill — reuses the same generator as
+  // Flash Cards mode, just with a fixed (non-mixed) operation.
+  const cur = generateProblem('flash', testState.op, testState.max);
+  testState.current = cur;
+  testState.problemStart = Date.now();
+  testProblemArea.textContent = cur.text;
+  testProgressEl.textContent = 'Problem ' + (testState.index + 1) + ' of ' + testState.total;
+  testAnswerInput.value = '';
+  testAnswerInput.disabled = false;
+  testAnswerInput.focus();
+}
+
+function testSubmitAnswer() {
+  if (!testState || !testState.current) return;
+  const cur = testState.current;
+  const raw = testAnswerInput.value.trim();
+  if (!raw) { testAnswerInput.focus(); return; }
+
+  const num     = Number(raw);
+  const elapsed = (Date.now() - testState.problemStart) / 1000;
+  const correct = Number.isFinite(num) && num === cur.answer;
+
+  testState.times.push(elapsed);
+  if (correct) {
+    testState.correctCount++;
+  } else {
+    testState.wrongCount++;
+    testState.missed.push({
+      problemText: cur.a + ' ' + cur.op + ' ' + cur.b,
+      given: raw,
+      correctAnswer: cur.answer
+    });
+  }
+
+  testState.index++;
+  if (testState.index >= testState.total) {
+    finishTest();
+  } else {
+    testNextProblem();
+  }
+}
+
+function finishTest() {
+  clearInterval(testState.timerInt);
+  testState.timerInt = null;
+  testState.totalSeconds = (Date.now() - testState.startTime) / 1000;
+
+  hideAllScreens();
+  testResultsOverlay.style.display = 'flex';
+  renderTestResults();
+
+  const studentName = (currentSession && currentSession.studentName)
+    ? currentSession.studentName
+    : (studentNameInput ? studentNameInput.value.trim() : '');
+
+  const avgSeconds = testState.times.length
+    ? testState.times.reduce(function(a, b) { return a + b; }, 0) / testState.times.length
+    : 0;
+
+  const record = {
+    studentName: studentName,
+    op: testState.op, max: testState.max, total: testState.total,
+    correct: testState.correctCount, wrong: testState.wrongCount,
+    totalSeconds: testState.totalSeconds, avgSeconds: avgSeconds,
+    missed: testState.missed,
+    timestamp: new Date().toISOString()
+  };
+
+  const all = loadAllTests();
+  all.push(record);
+  saveAllTests(all);
+  testState.lastRecord = record;
+}
+
+function renderTestResults() {
+  const t = testState;
+  const accuracy   = t.total > 0 ? Math.round((t.correctCount / t.total) * 100) : 0;
+  const avgSeconds = t.times.length
+    ? t.times.reduce(function(a, b) { return a + b; }, 0) / t.times.length : 0;
+  const ppm = t.totalSeconds > 0 ? (t.total / (t.totalSeconds / 60)) : 0;
+
+  function statCard(value, label) {
+    return '<div class="stat-card"><div class="stat-value">' + value +
+           '</div><div class="stat-label">' + label + '</div></div>';
+  }
+
+  testResultsSummary.innerHTML =
+    '<div class="test-result-title">' + OP_LABELS[t.op] + ' — ' + t.total + ' problems</div>' +
+    '<div class="stats-container test-stats">' +
+      statCard(formatTime(t.totalSeconds), 'Total Time') +
+      statCard(t.correctCount + ' / ' + t.total, 'Correct') +
+      statCard(accuracy + '%', 'Accuracy') +
+      statCard(avgSeconds.toFixed(2) + 's', 'Avg / Problem') +
+      statCard(ppm.toFixed(1), 'Problems / Min') +
+    '</div>';
+
+  testMissedBody.innerHTML = '';
+  if (t.missed.length) {
+    testMissedWrap.style.display = 'block';
+    t.missed.forEach(function(m) {
+      const tr = document.createElement('tr');
+      [m.problemText, m.given, m.correctAnswer].forEach(function(val) {
+        const td = document.createElement('td');
+        td.textContent = val;
+        tr.appendChild(td);
+      });
+      testMissedBody.appendChild(tr);
+    });
+  } else {
+    testMissedWrap.style.display = 'none';
+  }
+}
+
+function downloadTestCSV() {
+  const rec = testState && testState.lastRecord;
+  if (!rec) return;
+
+  const clean = function(v) {
+    if (v == null) return '';
+    const s = String(v);
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+
+  const header = ['StudentName','Operation','ProblemCount','MaxNumber','Correct','Wrong','TotalTimeSeconds','AvgTimeSeconds','Timestamp'];
+  const summaryRow = [
+    clean(rec.studentName), clean(OP_LABELS[rec.op]), rec.total, rec.max,
+    rec.correct, rec.wrong, rec.totalSeconds.toFixed(2), rec.avgSeconds.toFixed(2), rec.timestamp
+  ].join(',');
+
+  let csv = header.join(',') + '\n' + summaryRow + '\n\nMissedProblem,YourAnswer,CorrectAnswer\n';
+  rec.missed.forEach(function(m) {
+    csv += [clean(m.problemText), clean(m.given), clean(m.correctAnswer)].join(',') + '\n';
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const d    = new Date(rec.timestamp);
+  const name = 'numbersense_test_' + rec.op + '_' + d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.csv';
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function quitTest() {
+  if (!testState) return;
+  if (!confirm('End this test early? This attempt will not be saved.')) return;
+  clearInterval(testState.timerInt);
+  testState = null;
+  returnToHome();
+}
+
+function wireTestUI() {
+  if (wireTestUI._wired) return;
+  wireTestUI._wired = true;
+
+  if (openTestSetupBtn) openTestSetupBtn.addEventListener('click', openTestSetup);
+  if (openTestSetupFromHomeBtn) openTestSetupFromHomeBtn.addEventListener('click', openTestSetup);
+  testCancelBtn.addEventListener('click', returnToHome);
+  testStartBtn.addEventListener('click', startTest);
+
+  testAnswerForm.addEventListener('submit', function(e) { e.preventDefault(); testSubmitAnswer(); });
+  testQuitBtn.addEventListener('click', quitTest);
+
+  testAnswerInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); testSubmitAnswer(); return; }
+    const nav = ['Backspace','Delete','ArrowLeft','ArrowRight','Tab','Home','End'];
+    if (nav.indexOf(e.key) !== -1 || e.ctrlKey || e.metaKey) return;
+    if (!/[0-9]/.test(e.key)) e.preventDefault();
+  });
+
+  downloadTestBtn.addEventListener('click', downloadTestCSV);
+  retakeTestBtn.addEventListener('click', function() {
+    testResultsOverlay.style.display = 'none';
+    openTestSetup();
+  });
+  backToPracticeBtn.addEventListener('click', returnToHome);
+}
+wireTestUI();
+
+/* -------------------------
    WIRE UI
 ------------------------- */
 function wireUI() {

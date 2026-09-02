@@ -205,7 +205,7 @@ select:focus, input:focus {
   margin: 0 auto;
 }
 
-#answerInput {
+#answerInput, #testAnswerInput {
   flex: 1;
   font-size: 1.5rem;
   padding: 12px;
@@ -214,7 +214,7 @@ select:focus, input:focus {
   border-radius: 12px;
 }
 
-#answerInput:focus {
+#answerInput:focus, #testAnswerInput:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2);
 }
@@ -235,18 +235,18 @@ button {
 }
 
 /* Primary Button (Check) */
-#checkBtn {
+#checkBtn, #testCheckBtn {
   background-color: var(--primary);
   color: white;
   padding: 12px 24px;
   font-size: 1.1rem;
   box-shadow: 0 4px 6px rgba(99, 102, 241, 0.3);
 }
-#checkBtn:hover {
+#checkBtn:hover, #testCheckBtn:hover {
   background-color: var(--primary-hover);
   transform: translateY(-1px);
 }
-#checkBtn:active {
+#checkBtn:active, #testCheckBtn:active {
   transform: translateY(1px);
 }
 
@@ -501,6 +501,25 @@ button {
 /* -------------------------
    v3.7 — Student name in header
 ------------------------- */
+/* -------------------------
+   v3.9 — Timed Test
+------------------------- */
+.test-result-title {
+  font-weight: 700;
+  color: var(--text-muted);
+  margin: -4px 0 16px;
+}
+
+.test-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 600px) {
+  .test-stats { grid-template-columns: repeat(2, 1fr); }
+}
+
 #studentNameDisplay {
   font-size: 0.88rem;
   color: #6b7280;

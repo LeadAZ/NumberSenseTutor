@@ -53,6 +53,107 @@
       <div class="overlay-actions">
         <button id="continueSessionBtn">Continue last session</button>
         <button id="newSessionBtn" class="secondary">Start new session</button>
+        <button id="openTestSetupFromHomeBtn" class="secondary">Take a Timed Test</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timed Test Setup -->
+  <div id="testSetupOverlay" class="overlay" style="display:none" aria-modal="true" role="dialog">
+    <div class="overlay-card">
+      <h2>Timed Test</h2>
+      <p class="sub" style="margin:-4px 0 12px">One operation, straight through. The clock runs for the whole test.</p>
+
+      <div class="setup-row">
+        <label for="testOpSelect">Operation</label>
+        <select id="testOpSelect">
+          <option value="add">Addition</option>
+          <option value="sub">Subtraction</option>
+          <option value="mul">Multiplication</option>
+          <option value="div">Division</option>
+        </select>
+      </div>
+
+      <div class="setup-row">
+        <label for="testCount">Number of problems</label>
+        <select id="testCount">
+          <option value="10">10</option>
+          <option value="20">20</option>
+          <option value="30">30</option>
+          <option value="40">40</option>
+          <option value="50">50</option>
+          <option value="60">60</option>
+          <option value="70">70</option>
+          <option value="80">80</option>
+          <option value="90">90</option>
+          <option value="100" selected>100</option>
+        </select>
+      </div>
+
+      <div class="setup-row">
+        <label for="testMax">Max number</label>
+        <input id="testMax" type="number" value="12" min="5" max="100" />
+      </div>
+
+      <div class="overlay-actions">
+        <button id="testStartBtn">Start Test</button>
+        <button id="testCancelBtn" class="secondary">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timed Test Screen -->
+  <div id="testScreen" class="app" style="display:none" aria-hidden="true">
+    <header>
+      <h1 id="testTitle">Timed Test</h1>
+      <div class="sub">Answer each problem, then press Enter</div>
+    </header>
+
+    <div class="card">
+      <div class="controls row" style="border-bottom:none;margin-bottom:0;padding-bottom:0">
+        <div id="testProgress" class="progress-indicator" aria-live="polite">Problem 1 of 100</div>
+        <div style="margin-left:auto">
+          <button id="testQuitBtn" class="secondary" type="button">Quit Test</button>
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <div id="testProblemArea" class="big-problem" aria-live="polite">—</div>
+
+        <form id="testAnswerForm" class="answer-row">
+          <input
+            id="testAnswerInput"
+            type="text"
+            inputmode="numeric"
+            pattern="[0-9]*"
+            placeholder="Type answer"
+            autocomplete="off"
+            aria-label="Your answer"
+          />
+          <button id="testCheckBtn" type="submit" title="Check (Enter)">Check</button>
+          <div id="testTimer" class="timer" aria-live="polite">Time: 00:00.00</div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- Timed Test Results -->
+  <div id="testResultsOverlay" class="overlay" style="display:none" aria-modal="true" role="dialog">
+    <div class="overlay-card" style="max-width:520px">
+      <h2>Test Complete!</h2>
+      <div id="testResultsSummary"></div>
+
+      <div id="testMissedWrap" class="history-wrap" style="display:none;margin-top:16px;max-height:200px">
+        <table class="history-table" aria-label="Missed problems">
+          <thead><tr><th>Problem</th><th>Your Answer</th><th>Correct Answer</th></tr></thead>
+          <tbody id="testMissedBody"></tbody>
+        </table>
+      </div>
+
+      <div class="overlay-actions">
+        <button id="retakeTestBtn">Take Another Test</button>
+        <button id="downloadTestBtn" class="secondary">Download Results (CSV)</button>
+        <button id="backToPracticeBtn" class="secondary">Back to Practice</button>
       </div>
     </div>
   </div>
@@ -98,6 +199,7 @@
 
         <div style="margin-left:auto;display:flex;gap:8px">
           <button id="nextBtn" class="" type="button" title="New Problem (N)">New Problem</button>
+          <button id="openTestSetupBtn" class="secondary" type="button" title="Take a timed fluency test">Timed Test</button>
           <button id="resetStats" class="secondary" type="button" title="Reset all saved data">Reset All Data</button>
         </div>
       </div>

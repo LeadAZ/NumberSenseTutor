@@ -1162,7 +1162,7 @@ function startTest() {
   testState = {
     op: op, max: max, total: count,
     index: 0, correctCount: 0, wrongCount: 0,
-    times: [], missed: [],
+    times: [], missed: [], allProblems: [],
     current: null,
     startTime: null, problemStart: null, timerInt: null,
     totalSeconds: 0, lastRecord: null
@@ -1212,12 +1212,21 @@ function testSubmitAnswer() {
   const correct = Number.isFinite(num) && num === cur.answer;
 
   testState.times.push(elapsed);
+  const problemText = cur.a + ' ' + cur.op + ' ' + cur.b;
+  testState.allProblems.push({
+    num: testState.index + 1,
+    problemText: problemText,
+    given: raw,
+    correctAnswer: cur.answer,
+    correct: correct,
+    seconds: elapsed
+  });
   if (correct) {
     testState.correctCount++;
   } else {
     testState.wrongCount++;
     testState.missed.push({
-      problemText: cur.a + ' ' + cur.op + ' ' + cur.b,
+      problemText: problemText,
       given: raw,
       correctAnswer: cur.answer
     });
@@ -1254,6 +1263,7 @@ function finishTest() {
     correct: testState.correctCount, wrong: testState.wrongCount,
     totalSeconds: testState.totalSeconds, avgSeconds: avgSeconds,
     missed: testState.missed,
+    allProblems: testState.allProblems,
     timestamp: new Date().toISOString()
   };
 
@@ -1319,10 +1329,22 @@ function downloadTestCSV() {
     rec.correct, rec.wrong, rec.totalSeconds.toFixed(2), rec.avgSeconds.toFixed(2), rec.timestamp
   ].join(',');
 
-  let csv = header.join(',') + '\n' + summaryRow + '\n\nMissedProblem,YourAnswer,CorrectAnswer\n';
-  rec.missed.forEach(function(m) {
-    csv += [clean(m.problemText), clean(m.given), clean(m.correctAnswer)].join(',') + '\n';
+  let csv = header.join(',') + '\n' + summaryRow + '\n\n';
+
+  csv += '#,Problem,YourAnswer,CorrectAnswer,Result,TimeSeconds\n';
+  (rec.allProblems || []).forEach(function(p) {
+    csv += [
+      p.num, clean(p.problemText), clean(p.given), clean(p.correctAnswer),
+      p.correct ? 'Correct' : 'Wrong', p.seconds.toFixed(2)
+    ].join(',') + '\n';
   });
+
+  if (rec.missed.length) {
+    csv += '\nMissedProblem,YourAnswer,CorrectAnswer\n';
+    rec.missed.forEach(function(m) {
+      csv += [clean(m.problemText), clean(m.given), clean(m.correctAnswer)].join(',') + '\n';
+    });
+  }
 
   const blob = new Blob([csv], { type: 'text/csv' });
   const d    = new Date(rec.timestamp);

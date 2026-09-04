@@ -277,6 +277,7 @@ initSetupOverlay();
 ------------------------- */
 function startApp() {
   sessionOverlay.style.display = 'none';
+  appShell.style.display = 'flex';
   appShell.setAttribute('aria-hidden', 'false');
 
   // Sync in-app selects with setup screen choices
@@ -1125,6 +1126,7 @@ function saveAllTests(all) {
 
 function hideAllScreens() {
   sessionOverlay.style.display = 'none';
+  appShell.style.display = 'none';
   appShell.setAttribute('aria-hidden', 'true');
   testSetupOverlay.style.display = 'none';
   testScreen.style.display = 'none';
@@ -1136,6 +1138,7 @@ function hideAllScreens() {
 function returnToHome() {
   hideAllScreens();
   if (currentSession) {
+    appShell.style.display = 'flex';
     appShell.setAttribute('aria-hidden', 'false');
   } else {
     sessionOverlay.style.display = 'flex';
@@ -1170,7 +1173,10 @@ function startTest() {
   testTitleEl.textContent = 'Timed Test — ' + OP_LABELS[op];
 
   testState.startTime = Date.now();
-  testState.timerInt = setInterval(updateTestTimerDisplay, 200);
+  // Update 20x/sec so the hundredths-of-a-second display counts up
+  // smoothly instead of visibly jumping (200ms was too coarse for 2
+  // decimal places of precision).
+  testState.timerInt = setInterval(updateTestTimerDisplay, 50);
   updateTestTimerDisplay();
 
   testNextProblem();

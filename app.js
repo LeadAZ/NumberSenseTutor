@@ -87,19 +87,8 @@ function estimatePoolSize(mode, op, max) {
     return Math.max(c, 1);
   }
   if (mode === 'decompose') return Math.max(max - 4, 1);
-  if (op === 'mul') {
-    let c = 0;
-    for (let a = 1; a <= max; a++)
-      for (let b = 1; b <= max; b++)
-        if (a * b <= max) c++;
-    return Math.max(c, 1);
-  }
-  if (op === 'div') {
-    let c = 0;
-    const md = Math.min(12, Math.floor(max / 2));
-    for (let b = 2; b <= md; b++) c += Math.max(Math.floor(max / b), 0);
-    return Math.max(c, 1);
-  }
+  if (op === 'mul') return Math.max(max * max, 1);
+  if (op === 'div') return Math.max(Math.max(1, max - 1) * Math.max(1, max), 1);
   return Math.max(Math.floor(max * max / 4), 1);
 }
 
@@ -439,28 +428,23 @@ function generateProblem(mode, op, max) {
   let fullop = op;
   if (op === 'mix') fullop = Math.random() < 0.5 ? 'add' : 'sub';
 
+  // [v3.10] "Max Number" bounds the FACTORS for mul/div (e.g. a proper
+  // "times tables up to 12" range), not the product/dividend. The old
+  // behavior capped the *answer* at max, which shrank the real problem
+  // pool to a tiny fraction of what a teacher would expect (e.g. only
+  // 35 distinct problems for multiplication at max=12, vs. 144 now).
   if (fullop === 'div') {
-    const maxDiv   = Math.min(12, Math.floor(max / 2));
-    const b        = randInt(2, Math.max(2, maxDiv));
-    const quotient = randInt(1, Math.max(1, Math.floor(max / b)));
+    const b        = randInt(2, Math.max(2, max));
+    const quotient = randInt(1, Math.max(1, max));
     const dividend = b * quotient;
     return { type:'arith', a:dividend, b:b, op:'/', answer:quotient,
              text: dividend + ' ÷ ' + b + ' = ?', hint:getHint({a:dividend, b:b, op:'/'}) };
   }
 
   if (fullop === 'mul') {
-    const cands = [];
-    for (let a = 1; a <= max; a++)
-      for (let b = 1; b <= max; b++)
-        if (a * b <= max) cands.push({ a:a, b:b, prod:a*b });
-    if (!cands.length) {
-      const a = randInt(1, max-1), b = randInt(1, Math.max(1, max-a));
-      return { type:'arith', a:a, b:b, op:'+', answer:a+b,
-               text: a + ' + ' + b + ' = ?', hint:getHint({a:a,b:b,op:'+'}) };
-    }
-    const c = cands[randInt(0, cands.length-1)];
-    return { type:'arith', a:c.a, b:c.b, op:'×', answer:c.prod,
-             text: c.a + ' × ' + c.b + ' = ?', hint:getHint({a:c.a, b:c.b, op:'×'}) };
+    const a = randInt(1, max), b = randInt(1, max);
+    return { type:'arith', a:a, b:b, op:'×', answer:a*b,
+             text: a + ' × ' + b + ' = ?', hint:getHint({a:a, b:b, op:'×'}) };
   }
 
   if (fullop === 'add') {
@@ -1089,6 +1073,7 @@ const testSetupOverlay        = $('testSetupOverlay');
 const testOpSelect             = $('testOpSelect');
 const testCountInput           = $('testCount');
 const testMaxInput             = $('testMax');
+const testMaxHint              = $('testMaxHint');
 const testStartBtn             = $('testStartBtn');
 const testCancelBtn            = $('testCancelBtn');
 const openTestSetupBtn         = $('openTestSetupBtn');
@@ -1112,6 +1097,48 @@ const retakeTestBtn       = $('retakeTestBtn');
 const backToPracticeBtn   = $('backToPracticeBtn');
 
 let testState = null; // null whenever no test is in progress
+
+// [v3.10] Deck-based sampling: build every valid problem for the chosen
+// operation/max once, shuffle it, and draw without replacement. Once the
+// whole pool has been served, reshuffle and continue. This guarantees zero
+// repeats until every problem has appeared, which the practice mode's
+// "remember the last few" window can't promise for a fixed-length test.
+function buildProblemDeck(op, max) {
+  const deck = [];
+  if (op === 'mul') {
+    for (let a = 1; a <= max; a++)
+      for (let b = 1; b <= max; b++)
+        deck.push({ type:'arith', a:a, b:b, op:'×', answer:a*b,
+                    text: a + ' × ' + b + ' = ?', hint:getHint({a:a,b:b,op:'×'}) });
+  } else if (op === 'div') {
+    for (let b = 2; b <= Math.max(2, max); b++)
+      for (let q = 1; q <= max; q++) {
+        const dividend = b * q;
+        deck.push({ type:'arith', a:dividend, b:b, op:'/', answer:q,
+                    text: dividend + ' ÷ ' + b + ' = ?', hint:getHint({a:dividend,b:b,op:'/'}) });
+      }
+  } else if (op === 'add') {
+    for (let a = 1; a <= Math.max(1, max - 1); a++)
+      for (let b = 1; b <= Math.max(1, max - a); b++)
+        deck.push({ type:'arith', a:a, b:b, op:'+', answer:a+b,
+                    text: a + ' + ' + b + ' = ?', hint:getHint({a:a,b:b,op:'+'}) });
+  } else { // sub
+    for (let a = 2; a <= max; a++)
+      for (let b = 1; b <= a - 1; b++)
+        deck.push({ type:'arith', a:a, b:b, op:'-', answer:a-b,
+                    text: a + ' - ' + b + ' = ?', hint:getHint({a:a,b:b,op:'-'}) });
+  }
+  return deck.length ? deck : [generateProblem('flash', op, max)]; // safety net
+}
+
+function shuffleDeck(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = a[i]; a[i] = a[j]; a[j] = tmp;
+  }
+  return a;
+}
 
 function loadAllTests() {
   try {
@@ -1147,7 +1174,30 @@ function returnToHome() {
 
 function openTestSetup() {
   hideAllScreens();
+  updateTestMaxHint();
   testSetupOverlay.style.display = 'flex';
+}
+
+// [v3.11] "Max Number" means something different per operation (it bounds
+// the sum for addition, the larger number for subtraction, but each
+// FACTOR for multiplication/division — which can make the actual answer
+// much bigger than Max Number itself). Spell that out concretely so a
+// teacher picking "12" knows what they're actually going to get.
+function updateTestMaxHint() {
+  if (!testMaxHint) return;
+  const max = parseInt(testMaxInput.value, 10) || 12;
+  const op  = testOpSelect.value;
+  let msg = '';
+  if (op === 'add') {
+    msg = 'Caps the sum. Max ' + max + ' → problems like ' + Math.ceil(max/2) + ' + ' + Math.floor(max/2) + ' (answers up to ' + max + ').';
+  } else if (op === 'sub') {
+    msg = 'Caps the larger (starting) number. Max ' + max + ' → problems like ' + max + ' − ' + Math.max(1, max - 3) + '.';
+  } else if (op === 'mul') {
+    msg = 'Caps EACH factor (not the answer). Max ' + max + ' → factors 1–' + max + ', so products can go up to ' + (max*max) + ' (e.g. ' + max + ' × ' + max + ' = ' + (max*max) + ').';
+  } else if (op === 'div') {
+    msg = 'Caps the divisor and the quotient (not the dividend). Max ' + max + ' → dividends can go up to ' + (max*max) + ' (e.g. ' + (max*max) + ' ÷ ' + max + ' = ' + max + ').';
+  }
+  testMaxHint.textContent = msg;
 }
 
 function startTest() {
@@ -1164,6 +1214,7 @@ function startTest() {
     index: 0, correctCount: 0, wrongCount: 0,
     times: [], missed: [], allProblems: [],
     current: null,
+    deck: shuffleDeck(buildProblemDeck(op, max)), deckIndex: 0,
     startTime: null, problemStart: null, timerInt: null,
     totalSeconds: 0, lastRecord: null
   };
@@ -1189,9 +1240,20 @@ function updateTestTimerDisplay() {
 
 function testNextProblem() {
   if (!testState) return;
-  // Straight arithmetic fluency drill — reuses the same generator as
-  // Flash Cards mode, just with a fixed (non-mixed) operation.
-  const cur = generateProblem('flash', testState.op, testState.max);
+  // Draw the next card from the shuffled deck. Once exhausted, reshuffle
+  // for a fresh pass (breaking an immediate repeat across the boundary
+  // when the deck has more than one card) rather than falling back to
+  // plain random generation.
+  if (testState.deckIndex >= testState.deck.length) {
+    const last = testState.deck[testState.deck.length - 1];
+    let reshuffled = shuffleDeck(testState.deck);
+    if (reshuffled.length > 1 && reshuffled[0].text === last.text) {
+      const tmp = reshuffled[0]; reshuffled[0] = reshuffled[1]; reshuffled[1] = tmp;
+    }
+    testState.deck = reshuffled;
+    testState.deckIndex = 0;
+  }
+  const cur = testState.deck[testState.deckIndex++];
   testState.current = cur;
   testState.problemStart = Date.now();
   testProblemArea.textContent = cur.text;
@@ -1373,6 +1435,8 @@ function wireTestUI() {
   if (openTestSetupFromHomeBtn) openTestSetupFromHomeBtn.addEventListener('click', openTestSetup);
   testCancelBtn.addEventListener('click', returnToHome);
   testStartBtn.addEventListener('click', startTest);
+  testOpSelect.addEventListener('change', updateTestMaxHint);
+  testMaxInput.addEventListener('input', updateTestMaxHint);
 
   testAnswerForm.addEventListener('submit', function(e) { e.preventDefault(); testSubmitAnswer(); });
   testQuitBtn.addEventListener('click', quitTest);

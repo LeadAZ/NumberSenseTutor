@@ -54,6 +54,7 @@
         <button id="continueSessionBtn">Continue last session</button>
         <button id="newSessionBtn" class="secondary">Start new session</button>
         <button id="openTestSetupFromHomeBtn" class="secondary">Take a Timed Test</button>
+        <button id="openReportsFromHomeBtn" class="secondary">Teacher Dashboard</button>
       </div>
     </div>
   </div>
@@ -159,6 +160,45 @@
     </div>
   </div>
 
+  <!-- Teacher Dashboard -->
+  <div id="reportsScreen" class="app" style="display:none" aria-hidden="true">
+    <header>
+      <h1>Teacher Dashboard</h1>
+      <div class="sub">Practice sessions &amp; timed test history, across all students on this device</div>
+    </header>
+
+    <div class="card">
+      <div class="controls row" style="border-bottom:none;padding-bottom:0;margin-bottom:0;flex-wrap:wrap;gap:10px">
+        <div class="setup-row" style="margin:0;display:flex;align-items:center;gap:8px">
+          <label for="reportStudentSelect" style="margin:0">Student</label>
+          <select id="reportStudentSelect"><option value="__all__">All Students</option></select>
+        </div>
+        <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="downloadReportBtn" class="secondary" type="button">Download CSV</button>
+          <button id="reportsBackBtn" class="secondary" type="button">Back</button>
+        </div>
+      </div>
+
+      <div id="reportSummary" class="stats-container test-stats" style="margin-top:18px"></div>
+
+      <h3 style="margin:22px 0 8px">Timed Tests <span style="font-weight:400;color:var(--text-muted);font-size:0.85rem">(most recent first)</span></h3>
+      <div class="history-wrap" style="max-height:260px">
+        <table class="history-table" aria-label="Timed test history">
+          <thead><tr><th>Date &amp; Time</th><th>Student</th><th>Operation</th><th>Problems</th><th>Correct</th><th>Accuracy</th><th>Total Time</th></tr></thead>
+          <tbody id="reportTestsBody"></tbody>
+        </table>
+      </div>
+
+      <h3 style="margin:22px 0 8px">Practice Sessions <span style="font-weight:400;color:var(--text-muted);font-size:0.85rem">(most recent first)</span></h3>
+      <div class="history-wrap" style="max-height:260px">
+        <table class="history-table" aria-label="Practice session history">
+          <thead><tr><th>Date &amp; Time</th><th>Student</th><th>Mode</th><th>Operation</th><th>Attempted</th><th>Correct</th><th>Accuracy</th><th>Avg Time</th></tr></thead>
+          <tbody id="reportSessionsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
   <div class="app" aria-hidden="true" id="appShell">
     <header>
       <h1 id="title">NumberSense Tutor</h1>
@@ -201,6 +241,7 @@
         <div style="margin-left:auto;display:flex;gap:8px">
           <button id="nextBtn" class="" type="button" title="New Problem (N)">New Problem</button>
           <button id="openTestSetupBtn" class="secondary" type="button" title="Take a timed fluency test">Timed Test</button>
+          <button id="openReportsBtn" class="secondary" type="button" title="View student results">Dashboard</button>
           <button id="resetStats" class="secondary" type="button" title="Reset all saved data">Reset All Data</button>
         </div>
       </div>

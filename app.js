@@ -1158,6 +1158,7 @@ function hideAllScreens() {
   testSetupOverlay.style.display = 'none';
   testScreen.style.display = 'none';
   testResultsOverlay.style.display = 'none';
+  reportsScreen.style.display = 'none';
 }
 
 // Return to whichever "home" screen makes sense: the practice app if a
@@ -1456,6 +1457,238 @@ function wireTestUI() {
   backToPracticeBtn.addEventListener('click', returnToHome);
 }
 wireTestUI();
+
+/* -------------------------
+   TEACHER DASHBOARD (v3.12)
+   Read-only report over everything already saved in localStorage:
+   practice sessions (ns_sessions_v1) and timed tests (ns_tests_v1).
+   Filterable by student, with summary stats and both history tables
+   sorted newest-first, plus a combined CSV export.
+------------------------- */
+const reportsScreen         = $('reportsScreen');
+const reportStudentSelect   = $('reportStudentSelect');
+const reportSummary         = $('reportSummary');
+const reportTestsBody       = $('reportTestsBody');
+const reportSessionsBody    = $('reportSessionsBody');
+const downloadReportBtn     = $('downloadReportBtn');
+const reportsBackBtn        = $('reportsBackBtn');
+const openReportsBtn        = $('openReportsBtn');
+const openReportsFromHomeBtn = $('openReportsFromHomeBtn');
+
+const MODE_LABELS = { flash: 'Flash Cards', visual: 'Ten Frame', story: 'Word Problems', decompose: 'Decompose' };
+
+function formatDateTime(msOrIso) {
+  const d = new Date(msOrIso);
+  if (isNaN(d.getTime())) return '—';
+  const datePart = (d.getMonth() + 1) + '/' + d.getDate() + '/' + d.getFullYear();
+  let h = d.getHours(); const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12; if (h === 0) h = 12;
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return datePart + ' ' + h + ':' + mins + ' ' + ampm;
+}
+
+function nameOrUnnamed(n) {
+  const t = (n || '').trim();
+  return t || 'Unnamed';
+}
+
+function openReports() {
+  hideAllScreens();
+  reportsScreen.style.display = 'flex';
+  populateReportStudentSelect();
+  renderReports();
+}
+
+function populateReportStudentSelect() {
+  const names = new Set();
+  loadAllSessions().forEach(function(s) { names.add(nameOrUnnamed(s.studentName)); });
+  loadAllTests().forEach(function(t) { names.add(nameOrUnnamed(t.studentName)); });
+  const sorted = Array.from(names).sort(function(a, b) { return a.localeCompare(b); });
+  const current = reportStudentSelect.value || '__all__';
+
+  reportStudentSelect.innerHTML = '';
+  const allOpt = document.createElement('option');
+  allOpt.value = '__all__'; allOpt.textContent = 'All Students';
+  reportStudentSelect.appendChild(allOpt);
+  sorted.forEach(function(n) {
+    const opt = document.createElement('option');
+    opt.value = n; opt.textContent = n;
+    reportStudentSelect.appendChild(opt);
+  });
+  reportStudentSelect.value = sorted.indexOf(current) !== -1 || current === '__all__' ? current : '__all__';
+}
+
+function getFilteredSessionsAndTests() {
+  const who = reportStudentSelect.value;
+  let sessions = loadAllSessions().slice();
+  let tests    = loadAllTests().slice();
+  if (who !== '__all__') {
+    sessions = sessions.filter(function(s) { return nameOrUnnamed(s.studentName) === who; });
+    tests    = tests.filter(function(t) { return nameOrUnnamed(t.studentName) === who; });
+  }
+  sessions.sort(function(a, b) { return (b.lastUsedAt || b.createdAt || 0) - (a.lastUsedAt || a.createdAt || 0); });
+  tests.sort(function(a, b) { return new Date(b.timestamp) - new Date(a.timestamp); });
+  return { sessions: sessions, tests: tests };
+}
+
+function renderReports() {
+  const data = getFilteredSessionsAndTests();
+  renderReportSummary(data.sessions, data.tests);
+  renderReportTestsTable(data.tests);
+  renderReportSessionsTable(data.sessions);
+}
+
+function renderReportSummary(sessions, tests) {
+  let practiceAttempted = 0, practiceCorrect = 0;
+  sessions.forEach(function(s) {
+    practiceAttempted += (s.stats && s.stats.attempted) || 0;
+    practiceCorrect   += (s.stats && s.stats.correct)   || 0;
+  });
+  let testCorrect = 0, testTotal = 0;
+  tests.forEach(function(t) { testCorrect += t.correct || 0; testTotal += t.total || 0; });
+
+  const practiceAcc = practiceAttempted > 0 ? Math.round((practiceCorrect / practiceAttempted) * 100) : 0;
+  const testAcc      = testTotal > 0 ? Math.round((testCorrect / testTotal) * 100) : 0;
+
+  const lastTimestamps = []
+    .concat(sessions.map(function(s) { return s.lastUsedAt || s.createdAt || 0; }))
+    .concat(tests.map(function(t) { return new Date(t.timestamp).getTime(); }));
+  const lastActivity = lastTimestamps.length ? Math.max.apply(null, lastTimestamps) : null;
+
+  function statCard(value, label) {
+    return '<div class="stat-card"><div class="stat-value">' + value +
+           '</div><div class="stat-label">' + label + '</div></div>';
+  }
+
+  reportSummary.innerHTML =
+    statCard(sessions.length, 'Practice Sessions') +
+    statCard(practiceAttempted, 'Problems Practiced') +
+    statCard(practiceAcc + '%', 'Practice Accuracy') +
+    statCard(tests.length, 'Timed Tests') +
+    statCard(testAcc + '%', 'Test Accuracy') +
+    statCard(lastActivity ? formatDateTime(lastActivity) : '—', 'Last Activity');
+}
+
+function renderReportTestsTable(tests) {
+  reportTestsBody.innerHTML = '';
+  if (!tests.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 7; td.textContent = 'No timed tests recorded yet.';
+    td.style.textAlign = 'center'; td.style.color = 'var(--text-muted)';
+    tr.appendChild(td); reportTestsBody.appendChild(tr);
+    return;
+  }
+  tests.forEach(function(t) {
+    const accuracy = t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0;
+    const tr = document.createElement('tr');
+    [
+      formatDateTime(t.timestamp),
+      nameOrUnnamed(t.studentName),
+      OP_LABELS[t.op] || t.op,
+      t.total,
+      t.correct + ' / ' + t.total,
+      accuracy + '%',
+      formatTime(t.totalSeconds)
+    ].forEach(function(val) {
+      const td = document.createElement('td');
+      td.textContent = val;
+      tr.appendChild(td);
+    });
+    reportTestsBody.appendChild(tr);
+  });
+}
+
+function renderReportSessionsTable(sessions) {
+  reportSessionsBody.innerHTML = '';
+  if (!sessions.length) {
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 8; td.textContent = 'No practice sessions recorded yet.';
+    td.style.textAlign = 'center'; td.style.color = 'var(--text-muted)';
+    tr.appendChild(td); reportSessionsBody.appendChild(tr);
+    return;
+  }
+  sessions.forEach(function(s) {
+    const attempted = (s.stats && s.stats.attempted) || 0;
+    const correct   = (s.stats && s.stats.correct)   || 0;
+    const accuracy  = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+    const avg       = (s.stats && s.stats.times) ? averageTime(s.stats.times) : 0;
+    const tr = document.createElement('tr');
+    [
+      formatDateTime(s.lastUsedAt || s.createdAt),
+      nameOrUnnamed(s.studentName),
+      MODE_LABELS[s.lastMode] || s.lastMode || '—',
+      s.lastOp ? (OP_LABELS[s.lastOp] || s.lastOp) : 'Mixed',
+      attempted,
+      correct,
+      accuracy + '%',
+      avg + 's'
+    ].forEach(function(val) {
+      const td = document.createElement('td');
+      td.textContent = val;
+      tr.appendChild(td);
+    });
+    reportSessionsBody.appendChild(tr);
+  });
+}
+
+function downloadReportCSV() {
+  const data = getFilteredSessionsAndTests();
+  const clean = function(v) {
+    if (v == null) return '';
+    const s = String(v);
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"' : s;
+  };
+
+  let csv = 'TIMED TESTS\n';
+  csv += 'Date,Student,Operation,ProblemCount,Correct,Wrong,Accuracy,TotalTimeSeconds\n';
+  data.tests.forEach(function(t) {
+    const accuracy = t.total > 0 ? Math.round((t.correct / t.total) * 100) : 0;
+    csv += [
+      clean(formatDateTime(t.timestamp)), clean(nameOrUnnamed(t.studentName)), clean(OP_LABELS[t.op] || t.op),
+      t.total, t.correct, t.wrong, accuracy + '%', t.totalSeconds.toFixed(2)
+    ].join(',') + '\n';
+  });
+
+  csv += '\nPRACTICE SESSIONS\n';
+  csv += 'Date,Student,Mode,Operation,Attempted,Correct,Accuracy,AvgTimeSeconds\n';
+  data.sessions.forEach(function(s) {
+    const attempted = (s.stats && s.stats.attempted) || 0;
+    const correct   = (s.stats && s.stats.correct)   || 0;
+    const accuracy  = attempted > 0 ? Math.round((correct / attempted) * 100) : 0;
+    const avg       = (s.stats && s.stats.times) ? averageTime(s.stats.times) : 0;
+    csv += [
+      clean(formatDateTime(s.lastUsedAt || s.createdAt)), clean(nameOrUnnamed(s.studentName)),
+      clean(MODE_LABELS[s.lastMode] || s.lastMode || ''), clean(s.lastOp ? (OP_LABELS[s.lastOp] || s.lastOp) : 'Mixed'),
+      attempted, correct, accuracy + '%', avg
+    ].join(',') + '\n';
+  });
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const who  = reportStudentSelect.value === '__all__' ? 'all_students' : reportStudentSelect.value.replace(/[^a-z0-9]+/gi, '_');
+  const d    = new Date();
+  const name = 'numbersense_report_' + who + '_' + d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') + '.csv';
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function wireReportsUI() {
+  if (wireReportsUI._wired) return;
+  wireReportsUI._wired = true;
+
+  if (openReportsBtn) openReportsBtn.addEventListener('click', openReports);
+  if (openReportsFromHomeBtn) openReportsFromHomeBtn.addEventListener('click', openReports);
+  reportsBackBtn.addEventListener('click', returnToHome);
+  reportStudentSelect.addEventListener('change', renderReports);
+  downloadReportBtn.addEventListener('click', downloadReportCSV);
+}
+wireReportsUI();
 
 /* -------------------------
    WIRE UI

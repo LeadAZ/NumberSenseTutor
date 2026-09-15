@@ -1,4 +1,4 @@
-// NumberSense Tutor v3.7
+// Number Sense Tutor v3.7
 // [v3.7] Setup screen: name, mode/op/max, last-session summary before first problem
 // [v3.8] Timer starts when the problem is displayed, not on first keystroke
 // [v3.7] 1-second pause + input lock after wrong answer before advancing

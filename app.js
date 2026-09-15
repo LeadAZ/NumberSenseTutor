@@ -33,6 +33,21 @@ const setupModeSelect  = $('setupModeSelect');
 const setupOpSelect    = $('setupOpSelect');
 const setupMaxNumber   = $('setupMaxNumber');
 const studentNameInput = $('studentNameInput');
+const studentNameError = $('studentNameError');
+
+function requireStudentName() {
+  const name = studentNameInput.value.trim();
+  if (!name) {
+    studentNameError.style.display = 'block';
+    studentNameInput.focus();
+    return false;
+  }
+  studentNameError.style.display = 'none';
+  return true;
+}
+studentNameInput.addEventListener('input', function() {
+  if (studentNameInput.value.trim()) studentNameError.style.display = 'none';
+});
 const lastSessionSummary = $('lastSessionSummary');
 const progressIndicator  = $('progressIndicator');
 const appShell        = $('appShell');
@@ -230,6 +245,7 @@ function applySetupValues() {
 }
 
 continueBtn.addEventListener('click', () => {
+  if (!requireStudentName()) return;
   applySetupValues();
   const all = loadAllSessions();
   currentSession = all.length ? all[all.length - 1] : createNewSession(studentNameInput.value.trim());
@@ -245,6 +261,7 @@ continueBtn.addEventListener('click', () => {
 });
 
 newBtn.addEventListener('click', () => {
+  if (!requireStudentName()) return;
   applySetupValues();
   const all = loadAllSessions();
   const _newName = studentNameInput.value.trim();
@@ -1433,7 +1450,10 @@ function wireTestUI() {
   wireTestUI._wired = true;
 
   if (openTestSetupBtn) openTestSetupBtn.addEventListener('click', openTestSetup);
-  if (openTestSetupFromHomeBtn) openTestSetupFromHomeBtn.addEventListener('click', openTestSetup);
+  if (openTestSetupFromHomeBtn) openTestSetupFromHomeBtn.addEventListener('click', function() {
+    if (!currentSession && !requireStudentName()) return; // only require it if no session is active yet
+    openTestSetup();
+  });
   testCancelBtn.addEventListener('click', returnToHome);
   testStartBtn.addEventListener('click', startTest);
   testOpSelect.addEventListener('change', updateTestMaxHint);

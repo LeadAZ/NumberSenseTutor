@@ -258,7 +258,8 @@ function syncSessionToCloud(session) {
     lastMode:    session.lastMode    || '',
     lastOp:      session.lastOp      || '',
     lastMax:     session.lastMax     || null,
-    stats:       session.stats       || {}
+    stats:       session.stats       || {},
+    history:     session.history     || [] // needed so the Sheet can list which problems were missed
   });
 }
 
@@ -266,6 +267,61 @@ function syncTestToCloud(record) {
   if (!cloudReady() || !record) return;
   if (!record.id) record.id = generateId();
   cloudPost('test', record);
+}
+
+// [v3.16] One-time (per device) upload of already-saved local history —
+// covers sessions/tests that happened before cloud sync existed, or ones
+// made while offline. Safe to run repeatedly: the backend upserts by id,
+// so re-uploading the same records never creates duplicates.
+function backfillLocalDataToCloud() {
+  if (!cloudReady()) {
+    alert('Cloud sync isn\'t set up on this page, so there\'s nothing to upload.');
+    return;
+  }
+  const sessions = loadAllSessions();
+  const tests = loadAllTests();
+  if (!sessions.length && !tests.length) {
+    alert('No local history found on this device to upload.');
+    return;
+  }
+
+  let sessionsChanged = false, testsChanged = false;
+  const jobs = [];
+
+  sessions.forEach(function(s) {
+    if (!s.id) { s.id = generateId(); sessionsChanged = true; }
+    jobs.push(cloudPost('session', {
+      id: s.id,
+      studentName: s.studentName || '',
+      createdAt:   s.createdAt   || Date.now(),
+      lastUsedAt:  s.lastUsedAt  || Date.now(),
+      lastMode:    s.lastMode    || '',
+      lastOp:      s.lastOp      || '',
+      lastMax:     s.lastMax     || null,
+      stats:       s.stats       || {},
+      history:     s.history     || []
+    }));
+  });
+
+  tests.forEach(function(t) {
+    if (!t.id) { t.id = generateId(); testsChanged = true; }
+    jobs.push(cloudPost('test', t));
+  });
+
+  // Persist any newly-assigned ids so a repeat upload doesn't create
+  // duplicate cloud rows for records that previously had no id.
+  if (sessionsChanged) saveAllSessions(sessions);
+  if (testsChanged) saveAllTests(tests);
+
+  backfillReportBtn.disabled = true;
+  backfillReportBtn.textContent = 'Uploading…';
+  Promise.all(jobs).then(function(results) {
+    const succeeded = results.filter(Boolean).length;
+    backfillReportBtn.disabled = false;
+    backfillReportBtn.textContent = "Upload This Device's History";
+    alert('Uploaded ' + succeeded + ' of ' + jobs.length + ' local record(s) to the cloud.');
+    refreshReportsData();
+  });
 }
 
 // [v3.7] Populate setup overlay from last session settings (or defaults)
@@ -1640,6 +1696,7 @@ const reportSummary         = $('reportSummary');
 const reportTestsBody       = $('reportTestsBody');
 const reportSessionsBody    = $('reportSessionsBody');
 const refreshReportBtn      = $('refreshReportBtn');
+const backfillReportBtn     = $('backfillReportBtn');
 const downloadReportBtn     = $('downloadReportBtn');
 const reportsBackBtn        = $('reportsBackBtn');
 const openReportsBtn        = $('openReportsBtn');
@@ -1911,6 +1968,7 @@ function wireReportsUI() {
   reportsBackBtn.addEventListener('click', returnToHome);
   reportStudentSelect.addEventListener('change', renderReports);
   refreshReportBtn.addEventListener('click', refreshReportsData);
+  backfillReportBtn.addEventListener('click', backfillLocalDataToCloud);
   downloadReportBtn.addEventListener('click', downloadReportCSV);
 }
 wireReportsUI();

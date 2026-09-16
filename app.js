@@ -210,22 +210,48 @@ function persistSession() {
 }
 
 /* -------------------------
-   CLOUD SYNC (v3.14)
-   Optional: if index.html's Firebase module set up window.__nsCloud, mirror
-   every save to Firestore too, so a Teacher Dashboard on ANY device can see
-   ALL students' data, not just what's local to that one browser. Entirely
-   best-effort and non-blocking: localStorage remains the source of truth
-   for the device that's actually running a session/test, so nothing here
-   can break practice/testing if the network or Firebase is unavailable.
+   CLOUD SYNC (v3.15)
+   Syncs to a Google Apps Script Web App backed by a Google Sheet (see
+   apps-script-backend.gs), rather than Firebase — chosen because Google
+   Workspace domains (script.google.com) are already allowed on school
+   networks that otherwise block Google Cloud API domains like Firestore.
+   Entirely best-effort and non-blocking: localStorage remains the source
+   of truth for the device actually running a session/test, so nothing
+   here can break practice/testing if the network or the sheet backend
+   is unavailable.
 ------------------------- */
+const CLOUD_SYNC_URL = 'https://script.google.com/macros/s/AKfycbzlk4w271b3NVUoTUx749G43JcFhxQgvzwlhu_M612PFdXsI3ks11-JP2rUBVbuoXx_Gw/exec';
+
 function cloudReady() {
-  return !!(window.__nsCloud && window.__nsCloud.ready);
+  return typeof CLOUD_SYNC_URL === 'string' && /^https:\/\//.test(CLOUD_SYNC_URL);
+}
+
+function cloudPost(kind, record) {
+  if (!cloudReady() || !record) return Promise.resolve(false);
+  // text/plain avoids a CORS preflight (OPTIONS) request, which Apps
+  // Script Web Apps can't answer correctly; doPost still parses the body
+  // as JSON server-side regardless of the declared content type.
+  return fetch(CLOUD_SYNC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+    body: JSON.stringify({ kind: kind, record: record })
+  }).then(function(res) { return res.ok; })
+    .catch(function() { return false; /* offline/blocked — local save already succeeded */ });
+}
+
+function cloudFetchAll() {
+  if (!cloudReady()) return Promise.resolve({ sessions: [], tests: [] });
+  return fetch(CLOUD_SYNC_URL, { method: 'GET' })
+    .then(function(res) { return res.json(); })
+    .then(function(data) { return { sessions: data.sessions || [], tests: data.tests || [] }; })
+    .catch(function() { return { sessions: [], tests: [] }; });
 }
 
 function syncSessionToCloud(session) {
   if (!cloudReady() || !session) return;
   if (!session.id) session.id = generateId();
-  window.__nsCloud.upsertSession(session.id, {
+  cloudPost('session', {
+    id: session.id,
     studentName: session.studentName || '',
     createdAt:   session.createdAt   || Date.now(),
     lastUsedAt:  session.lastUsedAt  || Date.now(),
@@ -233,14 +259,13 @@ function syncSessionToCloud(session) {
     lastOp:      session.lastOp      || '',
     lastMax:     session.lastMax     || null,
     stats:       session.stats       || {}
-  }).catch(function() { /* offline or blocked — local save already succeeded */ });
+  });
 }
 
 function syncTestToCloud(record) {
   if (!cloudReady() || !record) return;
   if (!record.id) record.id = generateId();
-  window.__nsCloud.upsertTest(record.id, record)
-    .catch(function() { /* offline or blocked — local save already succeeded */ });
+  cloudPost('test', record);
 }
 
 // [v3.7] Populate setup overlay from last session settings (or defaults)
@@ -1679,7 +1704,7 @@ function refreshReportsData() {
   loadingNote.textContent = 'Syncing with cloud data from all devices…';
   reportSummary.parentNode.insertBefore(loadingNote, reportSummary);
 
-  window.__nsCloud.fetchAll().then(function(cloud) {
+  cloudFetchAll().then(function(cloud) {
     reportsDataCache = {
       sessions: mergeById(local.sessions, cloud.sessions),
       tests:    mergeById(local.tests, cloud.tests)

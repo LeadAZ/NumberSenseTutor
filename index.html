@@ -175,6 +175,7 @@
           <select id="reportStudentSelect"><option value="__all__">All Students</option></select>
         </div>
         <div style="margin-left:auto;display:flex;gap:8px">
+          <button id="refreshReportBtn" class="secondary" type="button">Refresh</button>
           <button id="downloadReportBtn" class="secondary" type="button">Download CSV</button>
           <button id="reportsBackBtn" class="secondary" type="button">Back</button>
         </div>
@@ -315,6 +316,59 @@
       </div>
     </div>
   </div>
+
+  <!-- [v3.14] Firebase: optional cross-device sync for the Teacher Dashboard.
+       Exposes a small window.__nsCloud API that app.js calls into; if this
+       fails to load (offline, blocked, etc.) app.js falls back to
+       localStorage-only behavior automatically. -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-app.js";
+    import {
+      getFirestore, doc, setDoc, collection, getDocs, query, orderBy, limit
+    } from "https://www.gstatic.com/firebasejs/12.19.0/firebase-firestore.js";
+
+    const firebaseConfig = {
+      apiKey: "AIzaSyDIMGtMKO2XpLErFbMcgVOe7jHrgeC8opc",
+      authDomain: "number-sense-tutor-a72fd.firebaseapp.com",
+      projectId: "number-sense-tutor-a72fd",
+      storageBucket: "number-sense-tutor-a72fd.firebasestorage.app",
+      messagingSenderId: "221680962666",
+      appId: "1:221680962666:web:02691d44c126ffd1a2ce13"
+    };
+
+    let db = null;
+    try {
+      const app = initializeApp(firebaseConfig);
+      db = getFirestore(app);
+    } catch (e) {
+      console.warn('Firebase init failed; Teacher Dashboard will only show this device\'s data.', e);
+    }
+
+    window.__nsCloud = {
+      ready: !!db,
+      async upsertSession(id, data) {
+        if (!db) return false;
+        await setDoc(doc(db, 'sessions', id), data, { merge: true });
+        return true;
+      },
+      async upsertTest(id, data) {
+        if (!db) return false;
+        await setDoc(doc(db, 'tests', id), data, { merge: true });
+        return true;
+      },
+      async fetchAll() {
+        if (!db) return { sessions: [], tests: [] };
+        const [sessSnap, testSnap] = await Promise.all([
+          getDocs(query(collection(db, 'sessions'), orderBy('lastUsedAt', 'desc'), limit(500))),
+          getDocs(query(collection(db, 'tests'), orderBy('timestamp', 'desc'), limit(500)))
+        ]);
+        return {
+          sessions: sessSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+          tests:    testSnap.docs.map(d => ({ id: d.id, ...d.data() }))
+        };
+      }
+    };
+  </script>
 
   <script src="app.js" defer></script>
 </body>

@@ -182,8 +182,14 @@ function saveAllSessions(all) {
   catch { /* storage full or unavailable - session continues in memory */ }
 }
 
+// [v3.14] Stable id for cross-device cloud sync (Firestore doc id / merge key)
+function generateId() {
+  return Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 10);
+}
+
 function createNewSession(studentName) {
   return {
+    id: generateId(),
     createdAt: Date.now(), lastUsedAt: Date.now(),
     studentName: studentName || '',
     history: [],
@@ -200,6 +206,41 @@ function persistSession() {
     currentSession.lastUsedAt = Date.now();
     saveAllSessions(all);
   } catch { /* non-fatal */ }
+  syncSessionToCloud(currentSession);
+}
+
+/* -------------------------
+   CLOUD SYNC (v3.14)
+   Optional: if index.html's Firebase module set up window.__nsCloud, mirror
+   every save to Firestore too, so a Teacher Dashboard on ANY device can see
+   ALL students' data, not just what's local to that one browser. Entirely
+   best-effort and non-blocking: localStorage remains the source of truth
+   for the device that's actually running a session/test, so nothing here
+   can break practice/testing if the network or Firebase is unavailable.
+------------------------- */
+function cloudReady() {
+  return !!(window.__nsCloud && window.__nsCloud.ready);
+}
+
+function syncSessionToCloud(session) {
+  if (!cloudReady() || !session) return;
+  if (!session.id) session.id = generateId();
+  window.__nsCloud.upsertSession(session.id, {
+    studentName: session.studentName || '',
+    createdAt:   session.createdAt   || Date.now(),
+    lastUsedAt:  session.lastUsedAt  || Date.now(),
+    lastMode:    session.lastMode    || '',
+    lastOp:      session.lastOp      || '',
+    lastMax:     session.lastMax     || null,
+    stats:       session.stats       || {}
+  }).catch(function() { /* offline or blocked — local save already succeeded */ });
+}
+
+function syncTestToCloud(record) {
+  if (!cloudReady() || !record) return;
+  if (!record.id) record.id = generateId();
+  window.__nsCloud.upsertTest(record.id, record)
+    .catch(function() { /* offline or blocked — local save already succeeded */ });
 }
 
 // [v3.7] Populate setup overlay from last session settings (or defaults)
@@ -1419,6 +1460,7 @@ function finishTest() {
     : 0;
 
   const record = {
+    id: generateId(),
     studentName: studentName,
     op: testState.op, max: testState.max, total: testState.total,
     correct: testState.correctCount, wrong: testState.wrongCount,
@@ -1432,6 +1474,7 @@ function finishTest() {
   all.push(record);
   saveAllTests(all);
   testState.lastRecord = record;
+  syncTestToCloud(record);
 }
 
 function renderTestResults() {
@@ -1571,6 +1614,7 @@ const reportStudentSelect   = $('reportStudentSelect');
 const reportSummary         = $('reportSummary');
 const reportTestsBody       = $('reportTestsBody');
 const reportSessionsBody    = $('reportSessionsBody');
+const refreshReportBtn      = $('refreshReportBtn');
 const downloadReportBtn     = $('downloadReportBtn');
 const reportsBackBtn        = $('reportsBackBtn');
 const openReportsBtn        = $('openReportsBtn');
@@ -1593,17 +1637,70 @@ function nameOrUnnamed(n) {
   return t || 'Unnamed';
 }
 
+let reportsDataCache = null; // merged { sessions, tests } — local + cloud
+
+function mergeById(localList, cloudList) {
+  const map = new Map();
+  function keyFor(item) {
+    return item.id || (nameOrUnnamed(item.studentName) + '|' + (item.lastUsedAt || item.timestamp || item.createdAt || ''));
+  }
+  localList.forEach(function(item) { map.set(keyFor(item), item); });
+  // Cloud entries win on conflict (assumed more complete/authoritative across devices),
+  // but fall back to local fields for anything the cloud copy might be missing.
+  cloudList.forEach(function(item) {
+    const key = keyFor(item);
+    map.set(key, Object.assign({}, map.get(key) || {}, item));
+  });
+  return Array.from(map.values());
+}
+
 function openReports() {
   hideAllScreens();
   reportsScreen.style.display = 'flex';
+  refreshReportsData();
+}
+
+function refreshReportsData() {
+  const local = { sessions: loadAllSessions(), tests: loadAllTests() };
+
+  // Show local data immediately so the screen isn't blank while the cloud
+  // fetch (if any) is in flight.
+  reportsDataCache = local;
   populateReportStudentSelect();
   renderReports();
+
+  if (!cloudReady()) return;
+
+  reportStudentSelect.disabled = true;
+  const loadingNote = document.createElement('div');
+  loadingNote.id = 'reportCloudLoading';
+  loadingNote.className = 'sub';
+  loadingNote.style.margin = '4px 0';
+  loadingNote.textContent = 'Syncing with cloud data from all devices…';
+  reportSummary.parentNode.insertBefore(loadingNote, reportSummary);
+
+  window.__nsCloud.fetchAll().then(function(cloud) {
+    reportsDataCache = {
+      sessions: mergeById(local.sessions, cloud.sessions),
+      tests:    mergeById(local.tests, cloud.tests)
+    };
+    reportStudentSelect.disabled = false;
+    const note = document.getElementById('reportCloudLoading');
+    if (note) note.remove();
+    populateReportStudentSelect();
+    renderReports();
+  }).catch(function() {
+    reportStudentSelect.disabled = false;
+    const note = document.getElementById('reportCloudLoading');
+    if (note) note.textContent = 'Could not reach the cloud — showing this device\'s data only.';
+  });
 }
 
 function populateReportStudentSelect() {
+  const data = reportsDataCache || { sessions: [], tests: [] };
   const names = new Set();
-  loadAllSessions().forEach(function(s) { names.add(nameOrUnnamed(s.studentName)); });
-  loadAllTests().forEach(function(t) { names.add(nameOrUnnamed(t.studentName)); });
+  data.sessions.forEach(function(s) { names.add(nameOrUnnamed(s.studentName)); });
+  data.tests.forEach(function(t) { names.add(nameOrUnnamed(t.studentName)); });
   const sorted = Array.from(names).sort(function(a, b) { return a.localeCompare(b); });
   const current = reportStudentSelect.value || '__all__';
 
@@ -1621,8 +1718,9 @@ function populateReportStudentSelect() {
 
 function getFilteredSessionsAndTests() {
   const who = reportStudentSelect.value;
-  let sessions = loadAllSessions().slice();
-  let tests    = loadAllTests().slice();
+  const data = reportsDataCache || { sessions: [], tests: [] };
+  let sessions = data.sessions.slice();
+  let tests    = data.tests.slice();
   if (who !== '__all__') {
     sessions = sessions.filter(function(s) { return nameOrUnnamed(s.studentName) === who; });
     tests    = tests.filter(function(t) { return nameOrUnnamed(t.studentName) === who; });
@@ -1787,6 +1885,7 @@ function wireReportsUI() {
   if (openReportsFromHomeBtn) openReportsFromHomeBtn.addEventListener('click', openReports);
   reportsBackBtn.addEventListener('click', returnToHome);
   reportStudentSelect.addEventListener('change', renderReports);
+  refreshReportBtn.addEventListener('click', refreshReportsData);
   downloadReportBtn.addEventListener('click', downloadReportCSV);
 }
 wireReportsUI();

@@ -61,6 +61,7 @@ const answerInput     = $('answerInput');
 const checkBtn        = $('checkBtn');
 const nextBtn         = $('nextBtn');
 const resetStatsBtn   = $('resetStats');
+const mainMenuBtn     = $('mainMenuBtn');
 const downloadSessionBtn = $('downloadSessionBtn');
 const hintBtn         = $('hintBtn');
 const hintText        = $('hintText');
@@ -1381,16 +1382,14 @@ function hideAllScreens() {
   reportsScreen.style.display = 'none';
 }
 
-// Return to whichever "home" screen makes sense: the practice app if a
-// session is active, otherwise the initial setup overlay.
+// [v3.17] The session-picker overlay is the app's single, predictable
+// "home" — every exit path (Cancel, Quit Test, Back) always lands here,
+// rather than sometimes silently jumping back into practice depending on
+// hidden state. Resuming practice is then always one deliberate click
+// away via "Continue last session," never automatic.
 function returnToHome() {
   hideAllScreens();
-  if (currentSession) {
-    appShell.style.display = 'flex';
-    appShell.setAttribute('aria-hidden', 'false');
-  } else {
-    sessionOverlay.style.display = 'flex';
-  }
+  sessionOverlay.style.display = 'flex';
 }
 
 function openTestSetup() {
@@ -1984,6 +1983,7 @@ function wireUI() {
   nextBtn.addEventListener('click', function() { newProblem(); });
   hintBtn.addEventListener('click', function() { showHint(); });
   downloadSessionBtn.addEventListener('click', function() { downloadSessionCSV(); });
+  mainMenuBtn.addEventListener('click', returnToHome);
 
   resetStatsBtn.addEventListener('click', function() {
     if (confirm('This will erase all saved sessions and progress. Are you sure?')) {

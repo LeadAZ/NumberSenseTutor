@@ -60,7 +60,6 @@ const answerForm      = $('answerForm');
 const answerInput     = $('answerInput');
 const checkBtn        = $('checkBtn');
 const nextBtn         = $('nextBtn');
-const resetStatsBtn   = $('resetStats');
 const mainMenuBtn     = $('mainMenuBtn');
 const downloadSessionBtn = $('downloadSessionBtn');
 const hintBtn         = $('hintBtn');
@@ -1984,18 +1983,6 @@ function wireUI() {
   hintBtn.addEventListener('click', function() { showHint(); });
   downloadSessionBtn.addEventListener('click', function() { downloadSessionCSV(); });
   mainMenuBtn.addEventListener('click', returnToHome);
-
-  resetStatsBtn.addEventListener('click', function() {
-    if (confirm('This will erase all saved sessions and progress. Are you sure?')) {
-      try { localStorage.removeItem(SESSIONS_KEY); } catch(e) { /* ignore */ }
-      currentSession = createNewSession();
-      recentProblems.length = 0; missedQueue.length = 0;
-      persistSession();
-      renderStats();
-      renderHistoryTable();
-      newProblem();
-    }
-  });
 
   document.addEventListener('keydown', globalKeydown);
 

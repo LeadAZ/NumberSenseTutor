@@ -762,12 +762,66 @@ function renderVisual(cur) {
   container.className = 'card';
   container.setAttribute('aria-label', 'ten-frames');
 
-  if (cur.op === '/') {
+  function addCaption(text) {
     var cap = document.createElement('div');
-    cap.className = 'hint';
-    cap.style.marginBottom = '8px';
-    cap.textContent = 'Total: ' + n + '. Split into groups of ' + cur.b + '.';
+    cap.className = 'visual-caption';
+    cap.textContent = text;
     container.appendChild(cap);
+  }
+
+  function addLegend(labelA, labelB) {
+    var legend = document.createElement('div');
+    legend.className = 'visual-legend';
+    var swA = document.createElement('span');
+    swA.className = 'legend-swatch group-a';
+    var swB = document.createElement('span');
+    swB.className = 'legend-swatch group-b';
+    legend.appendChild(swA);
+    legend.appendChild(document.createTextNode(labelA + '   '));
+    legend.appendChild(swB);
+    legend.appendChild(document.createTextNode(labelB));
+    container.appendChild(legend);
+  }
+
+  // [v3.13] Multiplication: show it as actual groups ("a groups of b"),
+  // not one flat blob of a*b dots that hides which numbers made it up.
+  if (cur.type === 'arith' && cur.op === '×' && cur.a <= 12 && cur.b <= 15) {
+    addCaption(cur.a + ' groups of ' + cur.b + ' — count all the dots to find the total.');
+    container.appendChild(buildDotGroups(cur.a, cur.b));
+    visualArea.appendChild(container);
+    return;
+  }
+
+  // [v3.13] Division: actually split into groups of the divisor, matching
+  // what the caption says (previously the caption promised grouping the
+  // dots never showed).
+  if (cur.op === '/' && cur.answer <= 12 && cur.b <= 15) {
+    addCaption(cur.a + ' ÷ ' + cur.b + ': split into groups of ' + cur.b + '. ' + cur.answer + ' groups fit.');
+    container.appendChild(buildDotGroups(cur.answer, cur.b));
+    visualArea.appendChild(container);
+    return;
+  }
+  if (cur.op === '/') {
+    addCaption('Total: ' + n + '. Split into groups of ' + cur.b + '.');
+  }
+
+  // [v3.13] Addition: color the two addends differently so a student can
+  // actually see where the first number ends and the second begins,
+  // instead of one undifferentiated block of dots.
+  if (cur.type === 'arith' && cur.op === '+') {
+    addCaption('Count ' + cur.a + ' (red), then keep counting ' + cur.b + ' more (blue).');
+  } else if (cur.type === 'arith' && cur.op === '-') {
+    addCaption('Start with ' + cur.a + ', cross out ' + cur.b + ', then count what is left.');
+  }
+
+  // [v3.13] Safety cap: once "Max Number" caps factors instead of the
+  // product, a large setting (e.g. 50) can make an ungroupable product
+  // huge (thousands of dots -> hundreds of ten-frames). Rather than
+  // render something impractical, fall back to a plain message.
+  if (n > 100) {
+    addCaption('This total (' + n + ') is too large to show as dots. Try Flash Cards mode for bigger numbers, or lower Max Number for a useful diagram.');
+    visualArea.appendChild(container);
+    return;
   }
 
   for (var f = 0; f < Math.ceil(n / 10); f++) {
@@ -776,10 +830,18 @@ function renderVisual(cur) {
     for (var i = 1; i <= 10; i++) {
       var cell = document.createElement('div');
       cell.className = 'cell';
-      if (f * 10 + i <= n) cell.classList.add('filled');
+      var idx = f * 10 + i;
+      if (idx <= n) {
+        cell.classList.add('filled');
+        if (cur.type === 'arith' && cur.op === '+' && idx > cur.a) cell.classList.add('group-b');
+      }
       frame.appendChild(cell);
     }
     container.appendChild(frame);
+  }
+
+  if (cur.type === 'arith' && cur.op === '+') {
+    addLegend(cur.a + ' (first number)', cur.b + ' (second number)');
   }
 
   if (cur.type === 'arith' && cur.op === '-') {
@@ -790,6 +852,25 @@ function renderVisual(cur) {
     }
   }
   visualArea.appendChild(container);
+}
+
+// [v3.13] Renders `groupCount` separate little clusters of `groupSize`
+// dots each — used so multiplication/division can show actual groups
+// instead of one flat count.
+function buildDotGroups(groupCount, groupSize) {
+  var wrap = document.createElement('div');
+  wrap.className = 'dot-groups-wrap';
+  for (var g = 0; g < groupCount; g++) {
+    var grp = document.createElement('div');
+    grp.className = 'dot-group';
+    for (var d = 0; d < groupSize; d++) {
+      var dot = document.createElement('div');
+      dot.className = 'mini-cell';
+      grp.appendChild(dot);
+    }
+    wrap.appendChild(grp);
+  }
+  return wrap;
 }
 
 function renderMake10Visual(cur) {

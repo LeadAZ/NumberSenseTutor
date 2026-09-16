@@ -172,6 +172,13 @@ select:focus, input:focus {
   animation: popIn 0.3s forwards cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
+/* [v3.13] Second addend gets a distinct color so the two numbers being
+   added are visually distinguishable instead of one undifferentiated
+   block of dots. */
+.cell.filled.group-b::after {
+  background: radial-gradient(circle at 30% 30%, #4dabf7, #1971c2);
+}
+
 .cell.crossed::after {
   content: '';
   position: absolute;
@@ -193,6 +200,67 @@ select:focus, input:focus {
 
 @keyframes popIn {
   to { transform: scale(1); }
+}
+
+/* [v3.13] Ten-frame visual clarity: captions, a color legend for
+   addition's two addends, and grouped-dot clusters for multiplication
+   and division so groups are actually visible instead of implied. */
+.visual-caption {
+  font-size: 0.85rem;
+  color: #312e81;
+  font-weight: 700;
+  margin-bottom: 10px;
+  max-width: 320px;
+  line-height: 1.4;
+}
+
+.visual-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: #312e81;
+  font-weight: 700;
+  margin-top: 10px;
+}
+
+.legend-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  margin-right: 2px;
+  vertical-align: middle;
+}
+.legend-swatch.group-a { background: radial-gradient(circle at 30% 30%, #ff6b6b, #d63031); }
+.legend-swatch.group-b { background: radial-gradient(circle at 30% 30%, #4dabf7, #1971c2); }
+
+.dot-groups-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dot-group {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  gap: 4px;
+  width: 84px;
+  min-height: 40px;
+  background-color: #312e81;
+  border: 2px solid rgba(255,255,255,0.25);
+  padding: 6px;
+  border-radius: 8px;
+}
+
+.mini-cell {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #ff6b6b, #d63031);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
 
 /* --- Answer Section --- */

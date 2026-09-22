@@ -198,12 +198,18 @@ function createNewSession(studentName) {
 }
 
 // [v3.5] Full error boundary around persist
+// [v3.18] Match by the session's own id, not array position -- multiple
+// students can now have sessions interleaved in storage (see the
+// Continue-button fix below), so "the last entry" is no longer a safe
+// assumption for "the current session."
 function persistSession() {
   try {
     let all = loadAllSessions();
-    if (!all.length) { all = [currentSession]; }
-    else { all[all.length - 1] = currentSession; }
     currentSession.lastUsedAt = Date.now();
+    if (!currentSession.id) currentSession.id = generateId();
+    const idx = all.findIndex(function(s) { return s.id === currentSession.id; });
+    if (idx === -1) { all.push(currentSession); }
+    else { all[idx] = currentSession; }
     saveAllSessions(all);
   } catch { /* non-fatal */ }
   syncSessionToCloud(currentSession);
@@ -369,16 +375,30 @@ function applySetupValues() {
 continueBtn.addEventListener('click', () => {
   if (!requireStudentName()) return;
   applySetupValues();
-  const all = loadAllSessions();
-  currentSession = all.length ? all[all.length - 1] : createNewSession(studentNameInput.value.trim());
-  // Update name and last settings on the existing session
   const _name = studentNameInput.value.trim();
-  currentSession.studentName = _name;
+  const all = loadAllSessions();
+
+  // [v3.18] Resume THIS student's own most recent session, matched by
+  // name -- never just "whatever session was last active on this
+  // device," which could silently continue (and relabel) someone
+  // else's data if a different name is typed in.
+  const nameLower = _name.toLowerCase();
+  const mine = all.filter(function(s) { return (s.studentName || '').trim().toLowerCase() === nameLower; });
+  mine.sort(function(a, b) { return (b.lastUsedAt || b.createdAt || 0) - (a.lastUsedAt || a.createdAt || 0); });
+
+  if (mine.length) {
+    currentSession = mine[0];
+  } else {
+    // No prior session under this name on this device -- start fresh
+    // rather than hijacking whoever used the device last.
+    currentSession = createNewSession(_name);
+  }
+
   try { if (_name) localStorage.setItem('ns_student_name', _name); } catch(e) {}
-  currentSession.lastMode    = state.mode;
-  currentSession.lastOp      = state.op;
-  currentSession.lastMax     = state.max;
-  if (!all.length) persistSession();
+  currentSession.lastMode = state.mode;
+  currentSession.lastOp   = state.op;
+  currentSession.lastMax  = state.max;
+  persistSession();
   startApp();
 });
 
